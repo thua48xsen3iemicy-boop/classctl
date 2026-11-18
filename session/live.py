@@ -1,4 +1,4 @@
-"""Read-only capture in the logged-in user's physical X11 session."""
+"""Authorized input and capture in the logged-in user's physical X11 session."""
 
 import argparse
 import asyncio
@@ -20,6 +20,7 @@ from aiortc import (
     VideoStreamTrack,
 )
 from av import VideoFrame
+from remote_input import Controller
 from PIL import Image, ImageDraw, ImageGrab
 
 
@@ -127,6 +128,14 @@ class Source:
         self.rev = 0
         self.monitors = []
         self.channels = {}
+        self.control_features = []
+        if not args.synthetic:
+            try:
+                probe = Controller()
+                probe.close()
+                self.control_features = ["control.monitor", "control.desktop"]
+            except Exception as error:
+                print(f"Ввод X11 недоступен: {error}", flush=True)
 
     def check(self, c):
         req = c["req"]
@@ -147,6 +156,8 @@ class Source:
         c = self.channels.pop(key, None)
         if c:
             c["until"] = 0
+            if "controller" in c:
+                c["controller"].close()
             if "peer" in c:
                 await c["peer"].close()
 
@@ -192,7 +203,8 @@ class Source:
                 dict(
                     base,
                     kind="capabilities",
-                    features=["view.monitor", "view.desktop", "preview.jpeg.v1"],
+                    features=["view.monitor", "view.desktop", "preview.jpeg.v1"]
+                    + self.control_features,
                     actions=[],
                 )
             )
@@ -201,8 +213,12 @@ class Source:
     async def frames(self):
         while True:
             for key, c in list(self.channels.items()):
-                if c["until"] <= time.monotonic():
+                if (
+                    min(c["until"], c.get("inputUntil", float("inf")))
+                    <= time.monotonic()
+                ):
                     await self.close(key)
+                    await self.ws.send_json(dict(key=key, op="ended"))
                     continue
                 if "peer" in c or c["awaiting"]:
                     continue
@@ -270,7 +286,21 @@ class Source:
                     await self.ws.send_json(
                         dict(key=key, message=dict(req, kind="preview.ready"))
                     )
-                elif req["kind"] == "access" and req["mode"] == "view":
+                elif req["kind"] == "access":
+                    if req["mode"] == "control":
+                        if not self.control_features or any(
+                            "controller" in ch for ch in self.channels.values()
+                        ):
+                            await self.close(key)
+                            await self.ws.send_json(dict(key=key, op="ended"))
+                            continue
+                        try:
+                            c["controller"] = Controller()
+                        except Exception:
+                            await self.close(key)
+                            await self.ws.send_json(dict(key=key, op="ended"))
+                            continue
+                        c["inputUntil"] = time.monotonic() + 5
                     peer = RTCPeerConnection(RTCConfiguration(iceServers=[]))
                     c["peer"] = peer
                     await peer.setRemoteDescription(
@@ -283,6 +313,16 @@ class Source:
                             key=key,
                             message=dict(type="answer", sdp=peer.localDescription.sdp),
                         )
+                    )
+            elif c and op == "input" and "controller" in c:
+                if min(c["until"], c["inputUntil"]) <= time.monotonic():
+                    await self.close(key)
+                    continue
+                self.check(c)
+                c["inputUntil"] = time.monotonic() + 3
+                if data["event"]["kind"] != "ping":
+                    c["controller"].event(
+                        data["event"], self.monitors, c["req"]["target"]
                     )
             elif c and op == "renew":
                 c["until"] = time.monotonic() + 3

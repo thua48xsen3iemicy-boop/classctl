@@ -27,6 +27,19 @@ def unique(items, context):
     require(len(items) == len(set(items)), f"Дубликат в {context}")
 
 
+def check_input():
+    schema=read(CONTRACTS/"input-v1.schema.json")
+    Draft202012Validator.check_schema(schema)
+    validator=Draft202012Validator(schema)
+    keys=read(CONTRACTS/"input-keys.json")
+    for code in keys:
+        validator.validate({"kind":"key","code":code,"down":True})
+    validator.validate({"kind":"button","u":0,"v":0.99,"down":False,"button":0})
+    for event in [{"kind":"move","u":1,"v":0},{"kind":"key","down":True,"code":"Unknown"},
+                  {"kind":"release","nodeId":"other"}]:
+        require(not validator.is_valid(event),"Несовместимое событие ввода принято")
+
+
 def check_examples():
     schema = read(CONTRACTS / "v1.schema.json")
     Draft202012Validator.check_schema(schema)
@@ -114,6 +127,7 @@ if __name__ == "__main__":
     try:
         check_examples()
         check_preview(ROOT)
+        check_input()
         check_links()
     except (ValueError, KeyError, OSError) as exc:
         sys.exit(f"Ошибка проверки: {exc}")

@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "key"
+        },
+        "code": {
+          "enum": [
+            "Digit1",
+            "Digit2",
+            "Digit3",
+            "Digit4",
+            "Digit5",
+            "Digit6",
+            "Digit7",
+            "Digit8",
+            "Digit9",
+            "Digit0",
+            "KeyQ",
+            "KeyW",
+            "KeyE",
+            "KeyR",
+            "KeyT",
+            "KeyY",
+            "KeyU",
+            "KeyI",
+            "KeyO",
+            "KeyP",
+            "KeyA",
+            "KeyS",
+            "KeyD",
+            "KeyF",
+            "KeyG",
+            "KeyH",
+            "KeyJ",
+            "KeyK",
+            "KeyL",
+            "KeyZ",
+            "KeyX",
+            "KeyC",
+            "KeyV",
+            "KeyB",
+            "KeyN",
+            "KeyM",
+            "Escape",
+            "Backquote",
+            "Minus",
+            "Equal",
+            "Backspace",
+            "Tab",
+            "BracketLeft",
+            "BracketRight",
+            "Backslash",
+            "CapsLock",
+            "Semicolon",
+            "Quote",
+            "Enter",
+            "ShiftLeft",
+            "ShiftRight",
+            "Comma",
+            "Period",
+            "Slash",
+            "ControlLeft",
+            "ControlRight",
+            "AltLeft",
+            "AltRight",
+            "MetaLeft",
+            "MetaRight",
+            "Space",
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "Insert",
+            "Delete",
+            "Home",
+            "End",
+            "PageUp",
+            "PageDown",
+            "IntlBackslash",
+            "F1",
+            "F2",
+            "F3",
+            "F4",
+            "F5",
+            "F6",
+            "F7",
+            "F8",
+            "F9",
+            "F10",
+            "F11",
+            "F12"
+          ]
+        },
+        "down": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "code",
+        "down"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "move"
+        },
+        "u": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 1
+        },
+        "v": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 1
+        }
+      },
+      "required": [
+        "kind",
+        "u",
+        "v"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "button"
+        },
+        "button": {
+          "enum": [
+            0,
+            1,
+            2
+          ]
+        },
+        "down": {
+          "type": "boolean"
+        },
+        "u": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 1
+        },
+        "v": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 1
+        }
+      },
+      "required": [
+        "kind",
+        "button",
+        "down",
+        "u",
+        "v"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "release"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "ping"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

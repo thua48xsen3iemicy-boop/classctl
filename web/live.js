@@ -1,13 +1,18 @@
 import { PreviewReceiver } from "/receiver.mjs";
 
+import { bindInput } from "/input.js";
+let canControl = false;
 const el = (id) => document.getElementById(id);
 let signature,
   binding,
   grid = [],
   focus,
   ice = [];
-const socket = () =>
-  new WebSocket("wss://" + location.host + "/stream", "classctl.preview.v1");
+const socket = (control = false) =>
+  new WebSocket(
+    "wss://" + location.host + "/stream",
+    control ? "classctl.input.v1" : "classctl.preview.v1",
+  );
 function button(label, action) {
   const b = document.createElement("button");
   b.textContent = label;
@@ -17,10 +22,12 @@ function button(label, action) {
 function closeFocus() {
   if (focus) {
     const { ws, peer } = focus;
+    focus.cleanup?.();
     focus = null;
     ws.close();
     peer.close();
   }
+  if (focus === null) el("status").textContent = "Просмотр доступен";
   el("focus").replaceChildren();
   el("grid").hidden = false;
   el("grid").style.display = "flex";
@@ -37,6 +44,11 @@ function startGrid() {
 function controls() {
   el("actions").replaceChildren();
   if (focus) {
+    if (canControl && focus.playing)
+      button(
+        focus.control ? "Выключить управление" : "Включить управление",
+        () => openView(focus.id, !focus.control),
+      );
     button("Вернуться в грид", () => {
       closeFocus();
       startGrid();
@@ -48,12 +60,12 @@ function controls() {
     button("Открыть " + m.monitorId, () => openView(m.monitorId));
   if (binding?.session) button("Весь рабочий стол", () => openView(null));
 }
-async function openView(id) {
+async function openView(id, control = false) {
   closeFocus();
   stopGrid();
-  const ws = socket(),
+  const ws = socket(control),
     peer = new RTCPeerConnection({ iceServers: ice });
-  const active = { ws, peer };
+  const active = { ws, peer, control, id };
   focus = active;
   const request = {
     version: 1,
@@ -61,7 +73,7 @@ async function openView(id) {
     nodeId: binding.nodeId,
     sessionId: binding.session.sessionId,
     layoutRevision: binding.session.layoutRevision,
-    mode: "view",
+    mode: control ? "control" : "view",
     target: id ? { scope: "monitor", monitorId: id } : { scope: "desktop" },
   };
   const title = document.createElement("h3");
@@ -70,6 +82,15 @@ async function openView(id) {
   video.autoplay = true;
   video.muted = true;
   video.playsInline = true;
+  video.onplaying = () => {
+    if (focus !== active || active.playing) return;
+    active.playing = true;
+    controls();
+    if (control) {
+      active.cleanup = bindInput(video, ws);
+      el("status").textContent = "Управление включено";
+    } else el("status").textContent = "Режим просмотра";
+  };
   video.style.cssText = "max-width:100%;max-height:65vh";
   el("focus").append(title, video);
   el("grid").style.display = "none";
@@ -199,11 +220,13 @@ async function poll() {
       seat = state.room.seats[0];
     binding = state.nodes[seat.nodeId];
     ice = state.iceServers;
+    canControl = state.controlNodes?.includes(seat.nodeId);
     el("room").textContent = "Аудитория " + state.room.roomId;
     el("seat").textContent = seat.seatId + " · " + seat.nodeId;
     const next = JSON.stringify([
       seat,
       binding?.availability,
+      canControl,
       binding?.session,
     ]);
     if (next !== signature) {
