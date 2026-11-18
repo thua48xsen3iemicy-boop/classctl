@@ -124,12 +124,15 @@ async def main(args):
 
     async def connect():
         nonlocal upstream
+        previous_error = None
         async with ClientSession() as client:
             while True:
                 try:
                     async with client.ws_connect(
                         args.server + "/source", ssl=tls, heartbeat=5
                     ) as ws:
+                        previous_error = None
+                        print(f"Соединение с {args.server}/source установлено", flush=True)
                         upstream = ws
                         check = asyncio.create_task(monitor(ws))
                         try:
@@ -142,8 +145,11 @@ async def main(args):
                             await asyncio.gather(check, return_exceptions=True)
                             if local is not None:
                                 await local.close()
-                except (OSError, ClientError):
-                    pass
+                except (OSError, ClientError) as error:
+                    detail = f"{type(error).__name__}: {error}"
+                    if detail != previous_error:
+                        print(f"Ошибка подключения: {detail}. Повтор через 1 с.", flush=True)
+                        previous_error = detail
                 await asyncio.sleep(1)
 
     app = web.Application()
@@ -153,6 +159,7 @@ async def main(args):
     os.umask(0o077)
     await web.UnixSite(runner, args.socket).start()
     os.chown(args.socket, args.uid, -1)
+    print(f"Слушаю Unix-сокет {args.socket} (UID {args.uid})", flush=True)
     try:
         await connect()
     finally:
