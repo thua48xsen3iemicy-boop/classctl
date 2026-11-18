@@ -24,7 +24,7 @@ preview_registry = Registry().with_resource(
 PREVIEW = Draft202012Validator(preview_schema, registry=preview_registry)
 
 
-class AccessServer(HTTPServer):
+class AccessPolicy:
     def policy(self):
         try:
             return json.loads(self.policy_path.read_text())
@@ -66,6 +66,8 @@ class AccessServer(HTTPServer):
                 (subject, event, json.dumps(target), outcome),
             )
 
+
+class AccessServer(AccessPolicy, HTTPServer):
     def service_actions(self):
         now = time.monotonic()
         policy = self.policy()

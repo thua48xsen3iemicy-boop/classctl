@@ -1,0 +1,5 @@
+-r ../requirements-check.txt
+aiohttp==3.14.4
+aiortc==1.14.0
+av==16.1.0
+pillow==13.0.0

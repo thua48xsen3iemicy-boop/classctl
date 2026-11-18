@@ -15,7 +15,7 @@ HERE = Path(__file__).resolve().parent
 EXAMPLES = HERE.parent / "contracts/examples"
 
 
-def test(tmp):
+def identities(tmp):
     def openssl(*args):
         subprocess.run(["openssl", *args], cwd=tmp, check=True, capture_output=True)
 
@@ -84,6 +84,13 @@ def test(tmp):
     }
     path = tmp / "policy"
     path.write_text(json.dumps(policy))
+    return contexts, ids
+
+
+def test(tmp):
+    contexts, ids = identities(tmp)
+    policy = json.loads((tmp / "policy").read_text())
+    path = tmp / "policy"
     with subprocess.Popen(
         [
             sys.executable,
