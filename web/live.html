@@ -1,24 +1,30 @@
 <!doctype html>
 <html lang="ru">
-  <meta charset="utf-8" /><meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
-  />
-  <title>classctl · Просмотр</title
-  ><link rel="stylesheet" href="/style.css" />
-  <header>classctl <span>/ Просмотр аудитории</span></header>
-  <main>
-    <h1 id="room">Аудитория</h1>
-    <article>
-      <h2 id="seat"></h2>
-      <p role="status" id="status">Подключение…</p>
-      <section
-        id="grid"
-        style="display: flex; flex-wrap: wrap; gap: 1rem"
-      ></section>
-      <section id="focus"></section>
-      <nav id="actions"></nav>
-    </article>
-  </main>
-  <script type="module" src="/live.js"></script>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>classctl</title>
+    <link rel="stylesheet" href="/live.css" />
+  </head>
+  <body>
+    <div id="viewport"><main id="grid" aria-label="Рабочие места"></main></div>
+    <section id="focus" hidden>
+      <nav id="tools" aria-label="Панель монитора">
+        <button
+          id="handle"
+          aria-label="Панель монитора"
+          aria-controls="drawer"
+          aria-expanded="false"
+        >
+          ‹
+        </button>
+        <div id="drawer" inert>
+          <strong id="target"></strong><span id="mode" role="status"></span>
+          <button id="back">← В аудиторию</button>
+        </div>
+      </nav>
+    </section>
+    <p id="notice" role="status">Подключение…</p>
+    <script type="module" src="/live.js"></script>
+  </body>
 </html>

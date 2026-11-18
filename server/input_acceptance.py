@@ -28,7 +28,7 @@ def exercise(page, tmp, monitor):
     rooms = next(
         t["rooms"] for t in config["teachers"].values() if "lab-a" in t["rooms"]
     )
-    page.get_by_text("Открыть DUMMY1").click()
+    page.get_by_role("button", name="desk-1 · DUMMY1").click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
     assert not page.get_by_text("Включить управление").count()
     page.evaluate(
@@ -39,9 +39,19 @@ def exercise(page, tmp, monitor):
     rooms["lab-a"].append("control")
     policy.write_text(json.dumps(config))
     page.wait_for_timeout(800)
-    page.get_by_text("Открыть DUMMY1").click()
-    page.get_by_text("Включить управление").click()
-    page.get_by_text("Управление включено", exact=True).wait_for()
+    page.get_by_role("button", name="desk-1 · DUMMY1").click()
+    page.wait_for_function(
+        "document.querySelector('#mode').textContent==='Управление включено'"
+    )
+    # The drawer owns its own pointer events while remote input is enabled.
+    page.locator("#handle").hover()
+    page.wait_for_function("!document.querySelector('#drawer').inert")
+    page.evaluate("""()=>{window.toolbarClicks=[];const ws=sockets.at(-1),send=ws.send.bind(ws);
+      ws.send=data=>{const msg=JSON.parse(data);if(msg.kind==='button')toolbarClicks.push(msg);send(data)}}""")
+    page.locator("#target").click()
+    assert page.evaluate("toolbarClicks.length===0")
+    page.evaluate("delete sockets.at(-1).send")
+    page.mouse.move(10, 10)
     # A second grant to the same authenticated teacher must also be refused.
     assert await_second_denial(page, monitor)
     video = page.locator("video")
@@ -97,7 +107,7 @@ def exercise(page, tmp, monitor):
     page.keyboard.up("Shift")
     page.mouse.up()
     page.reload()
-    page.get_by_text("Открыть DUMMY1").wait_for()
+    page.get_by_role("button", name="desk-1 · DUMMY1").wait_for()
     d.close()
     print(
         "T07: explicit control, physical pointer, Shift/button release on lost browser heartbeat OK"

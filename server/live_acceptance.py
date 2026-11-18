@@ -2,6 +2,7 @@
 
 import json
 import os
+import pwd
 import secrets
 import shutil
 import socket
@@ -22,6 +23,129 @@ def port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def check_dense_grid(context, origin, status):
+    """Fixture only: measure layout and target selection independently of throughput."""
+    page = context.new_page()
+    nodes = {}
+    seats = []
+    for i in range(25):
+        node = f"pc-{i + 1:02}"
+        nodes[node] = {**status, "nodeId": node}
+        seats.append(
+            dict(seatId=f"desk-{i + 1}", nodeId=node, row=i // 5 + 1, column=i % 5 + 1)
+        )
+    state = dict(
+        room=dict(roomId="lab", seats=seats),
+        nodes=nodes,
+        iceServers=[],
+        controlNodes=list(nodes),
+    )
+    page.route("**/state", lambda route: route.fulfill(json=state))
+    requests = []
+
+    def stream(ws):
+        ws.on_message(lambda message: requests.append(json.loads(message)))
+
+    page.route_web_socket("**/stream", stream)
+    # Simulate a managed browser that rejects the fullscreen request.
+    page.add_init_script(
+        "window.nativeFullscreen=Element.prototype.requestFullscreen;Element.prototype.requestFullscreen=()=>Promise.reject(new DOMException('Denied','NotAllowedError'))"
+    )
+    try:
+        page.goto(origin)
+        page.wait_for_function("document.querySelectorAll('.monitor').length===50")
+        for w, h in [(1366, 768), (1920, 1080)]:
+            page.set_viewport_size(dict(width=w, height=h))
+            assert page.evaluate("""()=>document.documentElement.scrollWidth===innerWidth &&
+                document.documentElement.scrollHeight===innerHeight &&
+                [...document.querySelectorAll('.monitor')].every(m=>{
+                  const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.right<=innerWidth&&r.bottom<=innerHeight})""")
+        caption = page.locator(".caption").first
+        assert caption.inner_text() == "pc-01"  # Older node: inventory fallback.
+
+        def dimensions():
+            return caption.evaluate(
+                """el=>[el.closest('button').offsetWidth,el.offsetHeight,getComputedStyle(el).fontSize]"""
+            )
+
+        before = dimensions()
+        page.keyboard.down("Control")
+        page.mouse.move(200, 200)
+        page.mouse.wheel(0, -120)
+        page.keyboard.up("Control")
+        page.wait_for_function("document.querySelector('#grid').offsetWidth>innerWidth")
+        after = dimensions()
+        assert after[0] > before[0] and after[1:] == before[1:]
+        page.keyboard.press("Control+0")
+        page.wait_for_function(
+            "document.querySelector('#grid').offsetWidth===innerWidth"
+        )
+        monitor = status["session"]["monitors"][1]["monitorId"]
+        page.get_by_role("button", name=f"desk-25 · {monitor}", exact=True).click()
+        for _ in range(100):
+            if any(m.get("request", {}).get("kind") == "access" for m in requests):
+                break
+            page.wait_for_timeout(50)
+        access = next(
+            m["request"] for m in requests if m["request"]["kind"] == "access"
+        )
+        assert access["nodeId"] == "pc-25" and access["mode"] == "control"
+        assert access["target"] == {"scope": "monitor", "monitorId": monitor}
+        assert page.evaluate("""()=>{const r=document.querySelector('video').getBoundingClientRect();
+            return r.width===innerWidth && r.height>innerHeight-55 && r.bottom===innerHeight}""")
+        assert page.evaluate(
+            "!document.fullscreenElement && document.querySelector('#drawer').inert"
+        )
+        handle = page.locator("#handle")
+        handle.hover()
+        page.wait_for_function("!document.querySelector('#drawer').inert")
+        page.mouse.move(20, 20)
+        page.wait_for_function("document.querySelector('#drawer').inert")
+        page.wait_for_timeout(200)
+        # Send a finger tap through Chromium's native touch input pipeline.
+        box = handle.bounding_box()
+        cdp = context.new_cdp_session(page)
+        cdp.send(
+            "Input.dispatchTouchEvent",
+            {
+                "type": "touchStart",
+                "touchPoints": [
+                    {
+                        "x": box["x"] + box["width"] / 2,
+                        "y": box["y"] + box["height"] / 2,
+                    }
+                ],
+            },
+        )
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        cdp.detach()
+        page.wait_for_function("!document.querySelector('#drawer').inert")
+        page.get_by_role("button", name="← В аудиторию").click()
+        page.wait_for_function("document.querySelectorAll('.monitor').length===50")
+        state["room"]["seats"] = seats[:1]
+        nodes["pc-01"]["session"] = {
+            **status["session"],
+            "monitors": status["session"]["monitors"][:1],
+        }
+        page.wait_for_function("document.querySelectorAll('.monitor').length===1")
+        page.evaluate(
+            "Element.prototype.requestFullscreen=window.nativeFullscreen;void 0"
+        )
+        page.locator(".monitor").click()
+        page.wait_for_function(
+            "document.fullscreenElement===document.querySelector('#focus')"
+        )
+        page.evaluate("document.exitFullscreen()")
+        page.wait_for_function(
+            "document.querySelector('.monitor') && document.querySelector('#focus').hidden"
+        )
+        print(
+            "Layout fixture: 25 seats, 50 monitor cards, no scrolling; correct target and full-page video"
+        )
+    finally:
+        page.close()
 
 
 def run(tmp, stack, x11):
@@ -161,15 +285,20 @@ def run(tmp, stack, x11):
     monitors = page.evaluate(
         "async()=> (await (await fetch('/state')).json()).nodes['pc-01'].session.monitors"
     )
+    expected_user = pwd.getpwuid(os.getuid()).pw_name
+    page.wait_for_function(
+        "text=>[...document.querySelectorAll('.caption')].some(el=>el.textContent===text)",
+        arg=socket.gethostname() + " · " + expected_user,
+    )
+    check_dense_grid(
+        ctx,
+        origin,
+        page.evaluate("async()=>(await (await fetch('/state')).json()).nodes['pc-01']"),
+    )
     first, second = monitors
-    for label, w, h in [
-        (f"Открыть {second['monitorId']}", second["width"], second["height"]),
-        (
-            "Весь рабочий стол",
-            max(m["x"] + m["width"] for m in monitors) - min(m["x"] for m in monitors),
-            max(m["y"] + m["height"] for m in monitors) - min(m["y"] for m in monitors),
-        ),
-    ]:
+    for monitor in (first, second):
+        label = "desk-1 · " + monitor["monitorId"]
+        w, h = monitor["width"], monitor["height"]
         page.get_by_role("button", name=label).click()
         page.wait_for_function(
             "([w,h])=>{const v=document.querySelector('video');return v&&v.readyState>=2&&v.videoWidth===w&&v.videoHeight===h}",
@@ -183,7 +312,14 @@ def run(tmp, stack, x11):
           return [c.candidateType,c.protocol,c.relayProtocol]}"""),
             flush=True,
         )
-        page.get_by_text("Вернуться в грид").click()
+        page.wait_for_function(
+            "document.fullscreenElement===document.querySelector('#focus')"
+        )
+        if monitor is first:
+            page.keyboard.press("Escape")
+        else:
+            page.locator("#handle").hover()
+            page.get_by_text("← В аудиторию").click()
         assert page.evaluate("pcs.at(-1).connectionState==='closed'")
     if "--dummy-layout" in sys.argv:
         if [first["monitorId"], second["monitorId"]] != ["DUMMY0", "DUMMY1"]:
@@ -197,10 +333,11 @@ def run(tmp, stack, x11):
             subprocess.run(["xrandr", *args], check=True)
 
         try:
-            page.get_by_text("Открыть DUMMY1").click()
+            page.get_by_role("button", name="desk-1 · DUMMY1").click()
             page.wait_for_function("document.querySelector('video')?.readyState>=2")
-            page.get_by_text("Включить управление").click()
-            page.get_by_text("Управление включено", exact=True).wait_for()
+            page.wait_for_function(
+                "document.querySelector('#mode').textContent==='Управление включено'"
+            )
             randr("--addmode", "DUMMY0", "lab640")
             randr(
                 "--output",
@@ -235,9 +372,15 @@ def run(tmp, stack, x11):
     source.wait()
     page.wait_for_function("document.querySelectorAll('canvas').length===0")
     page.get_by_text("Нет графической сессии").wait_for()
+    assert (
+        page.evaluate(
+            "async()=>(await (await fetch('/state')).json()).labels['pc-01'].user"
+        )
+        is None
+    )
     login()
     page.wait_for_function(grid)
-    page.get_by_text("Открыть " + first["monitorId"]).click()
+    page.get_by_role("button", name="desk-1 · " + first["monitorId"]).click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
     policy = json.loads((tmp / "policy").read_text())
     policy["teachers"].clear()
@@ -245,7 +388,7 @@ def run(tmp, stack, x11):
     page.wait_for_function(
         "pcs.at(-1).connectionState==='closed' && !document.querySelector('video') && !document.querySelector('canvas')"
     )
-    print("T05: grid, focus, desktop, track closure, logout/login, revocation OK")
+    print("T05: grid, individual monitors, track closure, logout/login, revocation OK")
 
 
 if __name__ == "__main__":
