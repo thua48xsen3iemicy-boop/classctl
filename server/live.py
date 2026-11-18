@@ -1,4 +1,4 @@
-"""Read-only coordinator. One authenticated source socket per inventory node."""
+"""Classroom coordinator. One authenticated source socket per inventory node."""
 
 import argparse
 import asyncio
@@ -10,10 +10,15 @@ import ssl
 import time
 from pathlib import Path
 
+from jsonschema import Draft202012Validator
 from aiohttp import WSMsgType, web
 from secure import AccessPolicy, CONTRACTS, Node, PREVIEW, inventory, validate
 
 ROOT = CONTRACTS.parent
+
+INPUT = Draft202012Validator(
+    json.loads((CONTRACTS / "input-v1.schema.json").read_text())
+)
 
 
 class Relay(AccessPolicy):
@@ -41,12 +46,23 @@ class Relay(AccessPolicy):
         return subject
 
     async def state(self, request):
-        self.teacher(request)
+        subject = self.teacher(request)
         return web.json_response(
             dict(
                 room=self.room,
                 nodes={k: n.status for k, n in self.nodes.items()},
                 iceServers=self.ice,
+                controlNodes=[
+                    ident
+                    for ident, node in self.nodes.items()
+                    if "control.monitor" in node.capabilities["features"]
+                    and "control"
+                    in self.policy()
+                    .get("teachers", {})
+                    .get(subject, {})
+                    .get("rooms", {})
+                    .get(self.room["roomId"], [])
+                ],
             ),
             headers={"Cache-Control": "no-store"},
         )
@@ -55,7 +71,9 @@ class Relay(AccessPolicy):
         subject = self.teacher(request)
         if request.headers.get("Origin") != "https://" + request.host:
             raise web.HTTPForbidden()
-        ws = web.WebSocketResponse(protocols=["classctl.preview.v1"], heartbeat=5)
+        ws = web.WebSocketResponse(
+            protocols=["classctl.input.v1", "classctl.preview.v1"], heartbeat=5
+        )
         await ws.prepare(request)
         key = secrets.token_urlsafe(24)
         try:
@@ -67,8 +85,13 @@ class Relay(AccessPolicy):
                     raise ValueError("Invalid subscription")
             else:
                 validate(req, "access")
-                if req["mode"] != "view":
-                    raise ValueError("Read only")
+                if req["mode"] == "control":
+                    if ws.ws_protocol != "classctl.input.v1" or any(
+                        r.get("mode") == "control" and r["nodeId"] == req["nodeId"]
+                        for _, _, _, r in self.channels.values()
+                    ):
+                        self.audit(subject, "control", req, "denied")
+                        raise ValueError("Control unavailable")
             node_id = req["nodeId"]
             if node_id not in self.sources or not self.allowed(
                 self.policy(), subject, req
@@ -84,6 +107,16 @@ class Relay(AccessPolicy):
                 if msg.type != WSMsgType.TEXT:
                     break
                 ack = json.loads(msg.data)
+                if req.get("mode") == "control":
+                    self.teacher(request)
+                    if (
+                        key in self.pending
+                        or not self.allowed(self.policy(), subject, req)
+                        or not INPUT.is_valid(ack)
+                    ):
+                        break
+                    await source.send_json(dict(key=key, op="input", event=ack))
+                    continue
                 if (
                     not preview
                     or not PREVIEW.is_valid(ack)
@@ -142,6 +175,11 @@ class Relay(AccessPolicy):
                             else:
                                 await dest.close()
                         continue
+                    if data.get("op") == "ended":
+                        channel = self.channels.get(data["key"])
+                        if channel and channel[1] is ws:
+                            await channel[0].close()
+                        continue
                     key, payload = data["key"], data["message"]
                 elif msg.type == WSMsgType.BINARY:
                     key = msg.data[:32].decode("ascii")
@@ -198,7 +236,15 @@ class Relay(AccessPolicy):
                         if time.monotonic() >= self.pending[key][0]:
                             await dest.close()
                         continue
-                    if self.allowed(policy, teacher, req) and not source.closed:
+                    if (
+                        self.allowed(policy, teacher, req)
+                        and not source.closed
+                        and "view"
+                        in policy.get("teachers", {})
+                        .get(teacher, {})
+                        .get("rooms", {})
+                        .get(self.room["roomId"], [])
+                    ):
                         try:
                             await asyncio.wait_for(
                                 source.send_json(dict(key=key, op="renew")), timeout=0.5
@@ -253,6 +299,8 @@ def main():
     for url, path in {
         "/": "web/live.html",
         "/live.js": "web/live.js",
+        "/input.js": "web/input.js",
+        "/input-keys.json": "contracts/input-keys.json",
         "/style.css": "web/style.css",
         "/receiver.mjs": "contracts/preview/receiver.mjs",
     }.items():

@@ -153,7 +153,7 @@ def run(tmp, stack, x11):
         ],
     )
     page = ctx.new_page()
-    page.add_init_script("""window.pcs=[];window.RTCPeerConnection=class extends RTCPeerConnection{
+    page.add_init_script("""window.sockets=[];window.WebSocket=class extends WebSocket{constructor(...a){super(...a);sockets.push(this)}};window.pcs=[];window.RTCPeerConnection=class extends RTCPeerConnection{
       constructor(...a){super(...a);pcs.push(this)}}""")
     page.goto(origin)
     grid = "document.querySelectorAll('canvas').length===2 && [...document.querySelectorAll('canvas')].every(c=>c.width>1)"
@@ -189,12 +189,18 @@ def run(tmp, stack, x11):
         if [first["monitorId"], second["monitorId"]] != ["DUMMY0", "DUMMY1"]:
             raise ValueError("Use only the disposable Xorg dummy display")
 
+        from input_acceptance import exercise
+
+        exercise(page, tmp, second)
+
         def randr(*args):
             subprocess.run(["xrandr", *args], check=True)
 
         try:
             page.get_by_text("Открыть DUMMY1").click()
             page.wait_for_function("document.querySelector('video')?.readyState>=2")
+            page.get_by_text("Включить управление").click()
+            page.get_by_text("Управление включено", exact=True).wait_for()
             randr("--addmode", "DUMMY0", "lab640")
             randr(
                 "--output",
