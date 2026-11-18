@@ -8,6 +8,14 @@
   </head>
   <body>
     <div id="viewport"><main id="grid" aria-label="Рабочие места"></main></div>
+    <aside class="picker" aria-label="Выбор компьютеров" hidden>
+      <button id="tab" aria-expanded="false" aria-controls="choices-panel">Компьютеры</button>
+      <section id="choices-panel" hidden>
+        <h2>Компьютеры</h2>
+        <p id="count"></p>
+        <div id="choices"></div>
+      </section>
+    </aside>
     <section id="focus" hidden>
       <nav id="tools" aria-label="Панель монитора">
         <button
