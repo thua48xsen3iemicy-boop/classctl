@@ -1,0 +1,67 @@
+<!doctype html><meta charset="utf-8"><title>Classctl preview experiment</title>
+<body><script>
+const draws = [], checks = [], stalls = [], videos = [], surfaces = [];
+let lastCheck, stale = false, socket, peer;
+async function init(c) {
+  const count = c.visible * c.outputs;
+  const last = Array(count).fill(-1);
+  const lastPaint = Array(count).fill(0);
+  for(let i=0;i<count;i++){
+    const canvas = document.createElement('canvas');
+    [canvas.width,canvas.height] = c.thumb;
+    document.body.append(canvas);
+    surfaces.push(canvas.getContext('2d',{willReadFrequently:true}));
+  }
+  function paint(i,image) {
+    const ctx = surfaces[i];
+    ctx.drawImage(image,0,0,...c.thumb);
+    const pixels = ctx.getImageData(0,8,128,1).data;
+    let seq = 0;
+    for(let b=0;b<16;b++) if(pixels[(8*b+4)*4]>128) seq += 2**b;
+    if(last[i]!==seq) draws.push([i,seq,Date.now()]);
+    last[i]=seq;
+    lastPaint[i]=performance.now();
+  }
+  socket = new WebSocket(c.relay.replace('https:','wss:')+'/down');
+  await new Promise((ok,fail)=>{socket.onopen=ok;socket.onerror=fail});
+  socket.onmessage=async e=>{
+    if(typeof e.data==='string'){
+      lastCheck=Date.now(); checks.push(lastCheck);
+      if(stale){ stalls.push(['recovered',lastCheck]); stale=false }
+      return;
+    }
+    const i=new DataView(await e.data.slice(0,2).arrayBuffer()).getUint16(0);
+    const image=await createImageBitmap(e.data.slice(2));
+    if(c.scenario==='slow') await new Promise(ok=>setTimeout(ok,350));
+    await new Promise(requestAnimationFrame);
+    paint(i,image); image.close(); socket.send(String(i));
+  };
+  setInterval(()=>{
+    if(lastCheck && !stale && Date.now()-lastCheck>=500){
+      stale=true; stalls.push(['stale',Date.now(),Date.now()-lastCheck]);
+    }
+  },25);
+  if(c.transport==='rtc'){
+    peer=new RTCPeerConnection({iceServers:[{urls:'turn:127.0.0.1:'+c.turnPort+'?transport=tcp',username:'pupil',credential:c.turnPassword}],iceTransportPolicy:'relay',bundlePolicy:'max-bundle'});
+    for(let i=0;i<count;i++) peer.addTransceiver('video',{direction:'recvonly'});
+    peer.ontrack=e=>{
+      const i=peer.getTransceivers().indexOf(e.transceiver);
+      const video=document.createElement('video'); video.muted=true; video.autoplay=true;
+      video.style.cssText='position:fixed;bottom:0;width:2px;height:2px'; document.body.append(video);
+      video.srcObject=new MediaStream([e.track]); videos.push(video);
+      let lastTotal = -1;
+      function frame(){
+        const total=video.getVideoPlaybackQuality().totalVideoFrames;
+        if(video.readyState>=2 && total!==lastTotal && (c.scenario!=='slow'||performance.now()-lastPaint[i]>=350)){
+          paint(i,video); lastTotal=total;
+        }
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    };
+    await peer.setLocalDescription(await peer.createOffer());
+    if(peer.iceGatheringState!=='complete') await new Promise(ok=>peer.onicegatheringstatechange=()=>{if(peer.iceGatheringState==='complete')ok()});
+    return peer.localDescription.toJSON();
+  }
+}
+</script>
