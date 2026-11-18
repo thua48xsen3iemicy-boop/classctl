@@ -1,0 +1,63 @@
+[
+  {
+    "version": 1,
+    "kind": "preview.subscribe",
+    "subscriptionId": "sub-1",
+    "nodeId": "pc-01",
+    "sessionId": "login-7",
+    "layoutRevision": 1,
+    "monitorId": "DP-2"
+  },
+  {
+    "version": 1,
+    "kind": "preview.ready",
+    "subscriptionId": "sub-1",
+    "nodeId": "pc-01",
+    "sessionId": "login-7",
+    "layoutRevision": 1,
+    "monitorId": "DP-2"
+  },
+  {
+    "version": 1,
+    "kind": "preview.frame",
+    "subscriptionId": "sub-1",
+    "nodeId": "pc-01",
+    "sessionId": "login-7",
+    "layoutRevision": 1,
+    "monitorId": "DP-2",
+    "seq": 1,
+    "capturedAt": "2026-11-18T09:00:00Z",
+    "mime": "image/jpeg",
+    "byteLength": 640
+  },
+  {
+    "version": 1,
+    "kind": "preview.ack",
+    "subscriptionId": "sub-1",
+    "nodeId": "pc-01",
+    "sessionId": "login-7",
+    "layoutRevision": 1,
+    "monitorId": "DP-2",
+    "seq": 1
+  },
+  {
+    "version": 1,
+    "kind": "preview.verified",
+    "subscriptionId": "sub-1",
+    "nodeId": "pc-01",
+    "sessionId": "login-7",
+    "layoutRevision": 1,
+    "monitorId": "DP-2",
+    "seq": 1,
+    "verifiedAt": "2026-11-18T09:00:01Z"
+  },
+  {
+    "version": 1,
+    "kind": "preview.unsubscribe",
+    "subscriptionId": "sub-1",
+    "nodeId": "pc-01",
+    "sessionId": "login-7",
+    "layoutRevision": 1,
+    "monitorId": "DP-2"
+  }
+]
