@@ -1,0 +1,580 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/room"
+    },
+    {
+      "$ref": "#/$defs/status"
+    },
+    {
+      "$ref": "#/$defs/access"
+    },
+    {
+      "$ref": "#/$defs/capabilities"
+    },
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/result"
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "seat": {
+      "type": "object",
+      "properties": {
+        "seatId": {
+          "$ref": "#/$defs/id"
+        },
+        "row": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "nodeId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "seatId",
+        "row",
+        "column",
+        "nodeId"
+      ],
+      "additionalProperties": false
+    },
+    "room": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "room"
+        },
+        "roomId": {
+          "$ref": "#/$defs/id"
+        },
+        "seats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/seat"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "version",
+        "kind",
+        "roomId",
+        "seats"
+      ],
+      "additionalProperties": false
+    },
+    "monitor": {
+      "type": "object",
+      "properties": {
+        "monitorId": {
+          "$ref": "#/$defs/id"
+        },
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rotation": {
+          "enum": [
+            0,
+            90,
+            180,
+            270
+          ]
+        },
+        "mirrorGroup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "monitorId",
+        "x",
+        "y",
+        "width",
+        "height",
+        "rotation",
+        "mirrorGroup"
+      ],
+      "additionalProperties": false
+    },
+    "session": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/id"
+        },
+        "layoutRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "monitors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/monitor"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "sessionId",
+        "layoutRevision",
+        "monitors"
+      ],
+      "additionalProperties": false
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "enum": [
+            "pending",
+            "moving",
+            "unchanged",
+            "stale"
+          ]
+        },
+        "lastFrameAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastVerifiedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "lastFrameAt",
+        "lastVerifiedAt"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "moving",
+                  "unchanged"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "lastFrameAt": {
+                "$ref": "#/$defs/time"
+              },
+              "lastVerifiedAt": {
+                "$ref": "#/$defs/time"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "pending"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "lastFrameAt": {
+                "type": "null"
+              },
+              "lastVerifiedAt": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "status"
+        },
+        "nodeId": {
+          "$ref": "#/$defs/id"
+        },
+        "availability": {
+          "enum": [
+            "online",
+            "offline"
+          ]
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/session"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "preview": {
+          "$ref": "#/$defs/preview"
+        }
+      },
+      "required": [
+        "version",
+        "kind",
+        "nodeId",
+        "availability",
+        "session",
+        "preview"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "availability": {
+                "const": "offline"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "session": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "session": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "preview": {
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "stale"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "target": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "desktop"
+            }
+          },
+          "required": [
+            "scope"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "monitor"
+            },
+            "monitorId": {
+              "$ref": "#/$defs/id"
+            }
+          },
+          "required": [
+            "scope",
+            "monitorId"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "access": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "access"
+        },
+        "nodeId": {
+          "$ref": "#/$defs/id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/id"
+        },
+        "layoutRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mode": {
+          "enum": [
+            "view",
+            "control"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        }
+      },
+      "required": [
+        "version",
+        "kind",
+        "nodeId",
+        "sessionId",
+        "layoutRevision",
+        "mode",
+        "target"
+      ],
+      "additionalProperties": false
+    },
+    "action": {
+      "type": "object",
+      "properties": {
+        "actionId": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "permission": {
+          "$ref": "#/$defs/id"
+        },
+        "context": {
+          "enum": [
+            "user",
+            "system"
+          ]
+        },
+        "maxTtlSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "parameterSchema": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "required": [
+        "actionId",
+        "label",
+        "permission",
+        "context",
+        "maxTtlSeconds",
+        "parameterSchema"
+      ],
+      "additionalProperties": false
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "capabilities"
+        },
+        "nodeId": {
+          "$ref": "#/$defs/id"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "version",
+        "kind",
+        "nodeId",
+        "features",
+        "actions"
+      ],
+      "additionalProperties": false
+    },
+    "request": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "action.request"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "actionId": {
+          "$ref": "#/$defs/id"
+        },
+        "nodeIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "issuedAt": {
+          "$ref": "#/$defs/time"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/time"
+        },
+        "parameters": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "version",
+        "kind",
+        "requestId",
+        "actionId",
+        "nodeIds",
+        "issuedAt",
+        "expiresAt",
+        "parameters"
+      ],
+      "additionalProperties": false
+    },
+    "outcome": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "$ref": "#/$defs/id"
+        },
+        "state": {
+          "enum": [
+            "accepted",
+            "succeeded",
+            "failed",
+            "expired",
+            "unknown",
+            "rejected"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "required": [
+        "nodeId",
+        "state",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "action.result"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "outcomes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/outcome"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "version",
+        "kind",
+        "requestId",
+        "outcomes"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

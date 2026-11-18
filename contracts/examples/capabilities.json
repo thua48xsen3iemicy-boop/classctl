@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "capabilities",
+  "nodeId": "pc-01",
+  "features": [
+    "preview",
+    "view.monitor"
+  ],
+  "actions": [
+    {
+      "actionId": "demo.echo",
+      "label": "Вернуть учебную метку",
+      "permission": "demo.run",
+      "context": "system",
+      "maxTtlSeconds": 30,
+      "parameterSchema": "demo.echo.v1"
+    }
+  ]
+}

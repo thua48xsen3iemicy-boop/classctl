@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "kind": "action.result",
+  "requestId": "req-42",
+  "outcomes": [
+    {
+      "nodeId": "pc-01",
+      "state": "succeeded",
+      "reason": "echoed"
+    },
+    {
+      "nodeId": "pc-02",
+      "state": "rejected",
+      "reason": "offline"
+    }
+  ]
+}

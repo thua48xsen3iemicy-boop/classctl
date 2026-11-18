@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "kind": "access",
+  "nodeId": "pc-01",
+  "sessionId": "login-7",
+  "layoutRevision": 1,
+  "mode": "view",
+  "target": {
+    "scope": "monitor",
+    "monitorId": "DP-2"
+  }
+}
