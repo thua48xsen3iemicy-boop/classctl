@@ -1,0 +1,22 @@
+[
+  {
+    "event": 0,
+    "field": "version",
+    "value": 2
+  },
+  {
+    "event": 2,
+    "field": "mime",
+    "value": "image/png"
+  },
+  {
+    "event": 2,
+    "field": "byteLength",
+    "value": 1048577
+  },
+  {
+    "event": 4,
+    "field": "seq",
+    "value": 0
+  }
+]

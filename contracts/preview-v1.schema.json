@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:classctl:preview:v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/subscribe"
+    },
+    {
+      "$ref": "#/$defs/ready"
+    },
+    {
+      "$ref": "#/$defs/frame"
+    },
+    {
+      "$ref": "#/$defs/ack"
+    },
+    {
+      "$ref": "#/$defs/verified"
+    },
+    {
+      "$ref": "#/$defs/unsubscribe"
+    }
+  ],
+  "$defs": {
+    "subscribe": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "subscriptionId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "nodeId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "sessionId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "layoutRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "monitorId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "kind": {
+          "const": "preview.subscribe"
+        }
+      },
+      "required": [
+        "version",
+        "subscriptionId",
+        "nodeId",
+        "sessionId",
+        "layoutRevision",
+        "monitorId",
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "ready": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "subscriptionId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "nodeId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "sessionId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "layoutRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "monitorId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "kind": {
+          "const": "preview.ready"
+        }
+      },
+      "required": [
+        "version",
+        "subscriptionId",
+        "nodeId",
+        "sessionId",
+        "layoutRevision",
+        "monitorId",
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "frame": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "subscriptionId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "nodeId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "sessionId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "layoutRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "monitorId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "kind": {
+          "const": "preview.frame"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "capturedAt": {
+          "$ref": "urn:classctl:control:v1#/$defs/time"
+        },
+        "mime": {
+          "const": "image/jpeg"
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        }
+      },
+      "required": [
+        "version",
+        "subscriptionId",
+        "nodeId",
+        "sessionId",
+        "layoutRevision",
+        "monitorId",
+        "kind",
+        "seq",
+        "capturedAt",
+        "mime",
+        "byteLength"
+      ],
+      "additionalProperties": false
+    },
+    "ack": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "subscriptionId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "nodeId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "sessionId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "layoutRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "monitorId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "kind": {
+          "const": "preview.ack"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "version",
+        "subscriptionId",
+        "nodeId",
+        "sessionId",
+        "layoutRevision",
+        "monitorId",
+        "kind",
+        "seq"
+      ],
+      "additionalProperties": false
+    },
+    "verified": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "subscriptionId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "nodeId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "sessionId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "layoutRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "monitorId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "kind": {
+          "const": "preview.verified"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "verifiedAt": {
+          "$ref": "urn:classctl:control:v1#/$defs/time"
+        }
+      },
+      "required": [
+        "version",
+        "subscriptionId",
+        "nodeId",
+        "sessionId",
+        "layoutRevision",
+        "monitorId",
+        "kind",
+        "seq",
+        "verifiedAt"
+      ],
+      "additionalProperties": false
+    },
+    "unsubscribe": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "subscriptionId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "nodeId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "sessionId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "layoutRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "monitorId": {
+          "$ref": "urn:classctl:control:v1#/$defs/id"
+        },
+        "kind": {
+          "const": "preview.unsubscribe"
+        }
+      },
+      "required": [
+        "version",
+        "subscriptionId",
+        "nodeId",
+        "sessionId",
+        "layoutRevision",
+        "monitorId",
+        "kind"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

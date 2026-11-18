@@ -3,6 +3,7 @@ import json
 import re
 import runpy
 import sys
+from preview import check_preview
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -112,6 +113,7 @@ def check_links():
 if __name__ == "__main__":
     try:
         check_examples()
+        check_preview(ROOT)
         check_links()
     except (ValueError, KeyError, OSError) as exc:
         sys.exit(f"Ошибка проверки: {exc}")
