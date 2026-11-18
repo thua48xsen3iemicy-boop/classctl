@@ -301,7 +301,7 @@ def main():
         "/live.js": "web/live.js",
         "/input.js": "web/input.js",
         "/input-keys.json": "contracts/input-keys.json",
-        "/style.css": "web/style.css",
+        "/live.css": "web/live.css",
         "/receiver.mjs": "contracts/preview/receiver.mjs",
     }.items():
         app.router.add_get(url, serve(ROOT / path))

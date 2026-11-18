@@ -24,6 +24,61 @@ def port():
         return s.getsockname()[1]
 
 
+def check_dense_grid(context, origin, status):
+    """Fixture only: measure layout and target selection independently of throughput."""
+    page = context.new_page()
+    nodes = {}
+    seats = []
+    for i in range(25):
+        node = f"pc-{i + 1:02}"
+        nodes[node] = {**status, "nodeId": node}
+        seats.append(
+            dict(seatId=f"desk-{i + 1}", nodeId=node, row=i // 5 + 1, column=i % 5 + 1)
+        )
+    state = dict(
+        room=dict(roomId="lab", seats=seats),
+        nodes=nodes,
+        iceServers=[],
+        controlNodes=list(nodes),
+    )
+    page.route("**/state", lambda route: route.fulfill(json=state))
+    requests = []
+
+    def stream(ws):
+        ws.on_message(lambda message: requests.append(json.loads(message)))
+
+    page.route_web_socket("**/stream", stream)
+    try:
+        page.goto(origin)
+        page.wait_for_function("document.querySelectorAll('.monitor').length===50")
+        for w, h in [(1366, 768), (1920, 1080)]:
+            page.set_viewport_size(dict(width=w, height=h))
+            assert page.evaluate("""()=>document.documentElement.scrollWidth===innerWidth &&
+                document.documentElement.scrollHeight===innerHeight &&
+                [...document.querySelectorAll('.monitor')].every(m=>{
+                  const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.right<=innerWidth&&r.bottom<=innerHeight})""")
+        monitor = status["session"]["monitors"][1]["monitorId"]
+        page.get_by_role("button", name=f"desk-25 · {monitor}", exact=True).click()
+        for _ in range(100):
+            if any(m.get("request", {}).get("kind") == "access" for m in requests):
+                break
+            page.wait_for_timeout(50)
+        access = next(
+            m["request"] for m in requests if m["request"]["kind"] == "access"
+        )
+        assert access["nodeId"] == "pc-25" and access["mode"] == "control"
+        assert access["target"] == {"scope": "monitor", "monitorId": monitor}
+        assert page.evaluate("""()=>{const r=document.querySelector('video').getBoundingClientRect();
+            return r.width===innerWidth && r.height>innerHeight-55 && r.bottom===innerHeight}""")
+        page.get_by_role("button", name="← В грид").click()
+        page.wait_for_function("document.querySelectorAll('.monitor').length===50")
+        print(
+            "Layout fixture: 25 seats, 50 monitor cards, no scrolling; correct target and full-page video"
+        )
+    finally:
+        page.close()
+
+
 def run(tmp, stack, x11):
     def start(args):
         p = subprocess.Popen(args, cwd=tmp, stdout=subprocess.DEVNULL)
@@ -161,15 +216,15 @@ def run(tmp, stack, x11):
     monitors = page.evaluate(
         "async()=> (await (await fetch('/state')).json()).nodes['pc-01'].session.monitors"
     )
+    check_dense_grid(
+        ctx,
+        origin,
+        page.evaluate("async()=>(await (await fetch('/state')).json()).nodes['pc-01']"),
+    )
     first, second = monitors
-    for label, w, h in [
-        (f"Открыть {second['monitorId']}", second["width"], second["height"]),
-        (
-            "Весь рабочий стол",
-            max(m["x"] + m["width"] for m in monitors) - min(m["x"] for m in monitors),
-            max(m["y"] + m["height"] for m in monitors) - min(m["y"] for m in monitors),
-        ),
-    ]:
+    for monitor in (first, second):
+        label = "desk-1 · " + monitor["monitorId"]
+        w, h = monitor["width"], monitor["height"]
         page.get_by_role("button", name=label).click()
         page.wait_for_function(
             "([w,h])=>{const v=document.querySelector('video');return v&&v.readyState>=2&&v.videoWidth===w&&v.videoHeight===h}",
@@ -183,7 +238,7 @@ def run(tmp, stack, x11):
           return [c.candidateType,c.protocol,c.relayProtocol]}"""),
             flush=True,
         )
-        page.get_by_text("Вернуться в грид").click()
+        page.get_by_text("← В грид").click()
         assert page.evaluate("pcs.at(-1).connectionState==='closed'")
     if "--dummy-layout" in sys.argv:
         if [first["monitorId"], second["monitorId"]] != ["DUMMY0", "DUMMY1"]:
@@ -197,9 +252,8 @@ def run(tmp, stack, x11):
             subprocess.run(["xrandr", *args], check=True)
 
         try:
-            page.get_by_text("Открыть DUMMY1").click()
+            page.get_by_role("button", name="desk-1 · DUMMY1").click()
             page.wait_for_function("document.querySelector('video')?.readyState>=2")
-            page.get_by_text("Включить управление").click()
             page.get_by_text("Управление включено", exact=True).wait_for()
             randr("--addmode", "DUMMY0", "lab640")
             randr(
@@ -237,7 +291,7 @@ def run(tmp, stack, x11):
     page.get_by_text("Нет графической сессии").wait_for()
     login()
     page.wait_for_function(grid)
-    page.get_by_text("Открыть " + first["monitorId"]).click()
+    page.get_by_role("button", name="desk-1 · " + first["monitorId"]).click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
     policy = json.loads((tmp / "policy").read_text())
     policy["teachers"].clear()
@@ -245,7 +299,7 @@ def run(tmp, stack, x11):
     page.wait_for_function(
         "pcs.at(-1).connectionState==='closed' && !document.querySelector('video') && !document.querySelector('canvas')"
     )
-    print("T05: grid, focus, desktop, track closure, logout/login, revocation OK")
+    print("T05: grid, individual monitors, track closure, logout/login, revocation OK")
 
 
 if __name__ == "__main__":
