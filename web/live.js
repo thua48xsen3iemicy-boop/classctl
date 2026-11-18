@@ -4,6 +4,46 @@ import { bindInput } from "/input.js";
 const el = (id) => document.getElementById(id);
 let state, focus;
 const cards = new Map();
+const viewport = el("viewport");
+let zoom = 1;
+viewport.addEventListener(
+  "wheel",
+  (event) => {
+    if (!event.ctrlKey || focus || !event.deltaY) return;
+    event.preventDefault();
+    const delta =
+      event.deltaY *
+      (event.deltaMode === 1
+        ? 16
+        : event.deltaMode === 2
+          ? viewport.clientHeight
+          : 1);
+    const next = Math.min(
+      4,
+      Math.max(
+        0.5,
+        zoom * Math.exp(-Math.max(-120, Math.min(120, delta)) * 0.002),
+      ),
+    );
+    const x = event.clientX - viewport.getBoundingClientRect().left;
+    const y = event.clientY - viewport.getBoundingClientRect().top;
+    const ratio = next / zoom;
+    const left = (viewport.scrollLeft + x) * ratio - x,
+      top = (viewport.scrollTop + y) * ratio - y;
+    zoom = next;
+    el("grid").style.setProperty("--scale", zoom);
+    viewport.scrollTo(left, top);
+  },
+  { passive: false },
+);
+document.addEventListener("keydown", (event) => {
+  if (!focus && event.ctrlKey && event.key === "0") {
+    event.preventDefault();
+    zoom = 1;
+    el("grid").style.removeProperty("--scale");
+    viewport.scrollTo(0, 0);
+  }
+});
 const socket = (control = false) =>
   new WebSocket(
     "wss://" + location.host + "/stream",
@@ -94,6 +134,9 @@ async function openView(seat, id) {
   // The browser requires user activation here, before any network await.
   el("focus")
     .requestFullscreen?.()
+    .then(() => {
+      active.fullscreen = true;
+    })
     .catch(() => {});
   el("notice").textContent = "";
   el("target").textContent = seat.seatId + " · " + id;
@@ -170,8 +213,21 @@ function preview(seat, binding, m, outputs, onDisconnect) {
     label = document.createElement("span");
   canvas.width = 1;
   canvas.height = 1;
-  label.textContent = m.monitorId + " · ожидание";
-  panel.append(canvas, label);
+  const caption = document.createElement("span");
+  caption.className = "caption";
+  const identity = state.labels?.[seat.nodeId];
+  caption.textContent = [identity?.hostname ?? seat.nodeId, identity?.user]
+    .filter(Boolean)
+    .join(" · ");
+  label.className = "signal";
+  function signal(text) {
+    label.textContent = text;
+    label.dataset.quiet = String(text === "в эфире" || text === "статично");
+    panel.setAttribute("aria-description", caption.textContent + " · " + text);
+    panel.title = caption.textContent + " · " + m.monitorId + " · " + text;
+  }
+  signal("ожидание");
+  panel.append(canvas, caption, label);
   panel.className = "monitor";
   panel.setAttribute("aria-label", seat.seatId + " · " + m.monitorId);
   panel.onclick = () => openView(seat, m.monitorId);
@@ -186,7 +242,7 @@ function preview(seat, binding, m, outputs, onDisconnect) {
       canvas.height = image.height;
       canvas.getContext("2d").drawImage(image, 0, 0);
       verified = performance.now();
-      label.textContent = m.monitorId + " · живое превью";
+      signal("в эфире");
     },
     clear: () => {
       canvas.width = 1;
@@ -203,7 +259,7 @@ function preview(seat, binding, m, outputs, onDisconnect) {
         const msg = JSON.parse(data);
         if (receiver.accept(msg) && msg.kind === "preview.verified") {
           verified = performance.now();
-          label.textContent = m.monitorId + " · экран неподвижен";
+          signal("статично");
         }
       } else {
         const n = new DataView(data).getUint32(0);
@@ -218,13 +274,12 @@ function preview(seat, binding, m, outputs, onDisconnect) {
     }
   };
   const timer = setInterval(() => {
-    if (verified && performance.now() - verified > 2000)
-      label.textContent = m.monitorId + " · кадр устарел";
+    if (verified && performance.now() - verified > 2000) signal("кадр устарел");
   }, 500);
   ws.onclose = () => {
     receiver.reset();
     clearInterval(timer);
-    label.textContent = m.monitorId + " · нет связи";
+    signal("нет связи");
     if (!cancelled) onDisconnect();
   };
   return () => {
@@ -243,7 +298,7 @@ function renderGrid() {
   grid.style.gridTemplateRows = "repeat(" + rows.length + ", minmax(0,1fr))";
   for (const seat of seats) {
     const binding = state.nodes[seat.nodeId];
-    const sig = signature(seat);
+    const sig = JSON.stringify([signature(seat), state.labels?.[seat.nodeId]]);
     const old = cards.get(seat.seatId);
     if (old?.signature === sig) continue;
     old?.stop();
@@ -252,7 +307,11 @@ function renderGrid() {
     card.style.gridRow = rows.indexOf(seat.row) + 1;
     card.style.gridColumn = cols.indexOf(seat.column) + 1;
     heading.textContent = seat.seatId + " · " + (seat.nodeId ?? "нет ПК");
-    card.append(heading);
+    if (!binding?.session) {
+      heading.textContent =
+        state.labels?.[seat.nodeId]?.hostname ?? seat.nodeId ?? seat.seatId;
+      card.append(heading);
+    }
     const outputs = document.createElement("div");
     outputs.className = "outputs";
     card.append(outputs);

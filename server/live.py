@@ -33,6 +33,7 @@ class Relay(AccessPolicy):
             "CREATE TABLE IF NOT EXISTS audit (time TEXT, subject TEXT, event TEXT, target TEXT, outcome TEXT)"
         )
         self.sources = {}
+        self.labels = {}
         self.channels = {}
         self.pending = {}
         self.ice = json.loads(Path(args.ice).read_text()) if args.ice else []
@@ -51,6 +52,16 @@ class Relay(AccessPolicy):
             dict(
                 room=self.room,
                 nodes={k: n.status for k, n in self.nodes.items()},
+                labels={
+                    ident: dict(
+                        hostname=label["hostname"],
+                        user=label["user"]
+                        if label["sessionId"]
+                        == (self.nodes[ident].status["session"] or {}).get("sessionId")
+                        else None,
+                    )
+                    for ident, label in self.labels.items()
+                },
                 iceServers=self.ice,
                 controlNodes=[
                     ident
@@ -154,6 +165,35 @@ class Relay(AccessPolicy):
                     data = json.loads(msg.data)
                     if data.get("kind") in ("status", "capabilities"):
                         self.nodes[ident].update(data["kind"], data, time.monotonic())
+                        session = self.nodes[ident].status["session"]
+                        if (
+                            data["kind"] == "capabilities"
+                            and "session.identity.v1" in data["features"]
+                            and session
+                            and ws.get("described") != session["sessionId"]
+                        ):
+                            ws["described"] = session["sessionId"]
+                            await ws.send_json(dict(key="", op="describe"))
+                        continue
+                    if data.get("op") == "identity":
+                        session = self.nodes[ident].status["session"]
+                        if (
+                            session
+                            and session["sessionId"] == data.get("sessionId")
+                            and all(
+                                isinstance(data.get(k), str) and 0 < len(data[k]) <= 255
+                                for k in (
+                                    ("hostname",)
+                                    if data.get("user") is None
+                                    else ("hostname", "user")
+                                )
+                            )
+                        ):
+                            self.labels[ident] = dict(
+                                sessionId=session["sessionId"],
+                                hostname=data["hostname"],
+                                user=data.get("user"),
+                            )
                         continue
                     if data.get("op") == "redeem":
                         key = data["key"]

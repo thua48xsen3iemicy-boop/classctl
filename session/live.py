@@ -6,6 +6,8 @@ import hashlib
 import io
 import json
 import os
+import pwd
+import socket
 import re
 import subprocess
 import time
@@ -203,7 +205,12 @@ class Source:
                 dict(
                     base,
                     kind="capabilities",
-                    features=["view.monitor", "view.desktop", "preview.jpeg.v1"]
+                    features=[
+                        "view.monitor",
+                        "view.desktop",
+                        "preview.jpeg.v1",
+                        "session.identity.v1",
+                    ]
                     + self.control_features,
                     actions=[],
                 )
@@ -275,7 +282,20 @@ class Source:
             data = json.loads(msg.data)
             key, op = data["key"], data["op"]
             c = self.channels.get(key)
-            if op == "ticket":
+            if op == "describe":
+                try:
+                    user = pwd.getpwuid(os.getuid()).pw_name
+                except KeyError:
+                    user = None
+                await self.ws.send_json(
+                    dict(
+                        op="identity",
+                        sessionId=self.session,
+                        hostname=socket.gethostname(),
+                        user=user,
+                    )
+                )
+            elif op == "ticket":
                 await self.ws.send_json(dict(key=key, op="redeem"))
             elif op == "open" and c is None:
                 req = data["request"]

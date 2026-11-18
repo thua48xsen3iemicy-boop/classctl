@@ -14,8 +14,16 @@ body {
 [hidden] {
   display: none !important;
 }
-#grid {
+#viewport {
   height: 100dvh;
+  overflow: auto;
+}
+#viewport:has(#grid[hidden]) {
+  display: none;
+}
+#grid {
+  width: calc(100vw * var(--scale, 1));
+  height: calc(100dvh * var(--scale, 1));
   padding: 4px;
   display: grid;
   gap: 4px;
@@ -43,7 +51,7 @@ h2 {
   flex: 1;
   display: flex;
   gap: 2px;
-  padding: 0 2px 2px;
+  padding: 0;
 }
 .monitor {
   border: 0;
@@ -53,8 +61,8 @@ h2 {
   min-width: 0;
   min-height: 0;
   flex: 1;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  position: relative;
+  overflow: hidden;
   cursor: pointer;
 }
 .monitor canvas {
@@ -63,13 +71,36 @@ h2 {
   object-fit: contain;
   min-height: 0;
 }
-.monitor span {
+.monitor .caption,
+.monitor .signal {
+  position: absolute;
+  pointer-events: none;
+  padding: 2px 5px;
+  background: rgb(7 15 12 / 68%);
+  color: white;
   font:
     11px/1.4 system-ui,
     sans-serif;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.caption {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: left;
+}
+.signal {
+  top: 0;
+  right: 0;
+}
+.signal[data-quiet="true"] {
+  opacity: 0;
+}
+.monitor:hover .signal,
+.monitor:focus-visible .signal {
+  opacity: 1;
 }
 button:focus-visible,
 .monitor:hover {

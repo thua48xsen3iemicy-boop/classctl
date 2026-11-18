@@ -2,6 +2,7 @@
 
 import json
 import os
+import pwd
 import secrets
 import shutil
 import socket
@@ -61,6 +62,26 @@ def check_dense_grid(context, origin, status):
                 document.documentElement.scrollHeight===innerHeight &&
                 [...document.querySelectorAll('.monitor')].every(m=>{
                   const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.right<=innerWidth&&r.bottom<=innerHeight})""")
+        caption = page.locator(".caption").first
+        assert caption.inner_text() == "pc-01"  # Older node: inventory fallback.
+
+        def dimensions():
+            return caption.evaluate(
+                """el=>[el.closest('button').offsetWidth,el.offsetHeight,getComputedStyle(el).fontSize]"""
+            )
+
+        before = dimensions()
+        page.keyboard.down("Control")
+        page.mouse.move(200, 200)
+        page.mouse.wheel(0, -120)
+        page.keyboard.up("Control")
+        page.wait_for_function("document.querySelector('#grid').offsetWidth>innerWidth")
+        after = dimensions()
+        assert after[0] > before[0] and after[1:] == before[1:]
+        page.keyboard.press("Control+0")
+        page.wait_for_function(
+            "document.querySelector('#grid').offsetWidth===innerWidth"
+        )
         monitor = status["session"]["monitors"][1]["monitorId"]
         page.get_by_role("button", name=f"desk-25 · {monitor}", exact=True).click()
         for _ in range(100):
@@ -264,6 +285,11 @@ def run(tmp, stack, x11):
     monitors = page.evaluate(
         "async()=> (await (await fetch('/state')).json()).nodes['pc-01'].session.monitors"
     )
+    expected_user = pwd.getpwuid(os.getuid()).pw_name
+    page.wait_for_function(
+        "text=>[...document.querySelectorAll('.caption')].some(el=>el.textContent===text)",
+        arg=socket.gethostname() + " · " + expected_user,
+    )
     check_dense_grid(
         ctx,
         origin,
@@ -346,6 +372,12 @@ def run(tmp, stack, x11):
     source.wait()
     page.wait_for_function("document.querySelectorAll('canvas').length===0")
     page.get_by_text("Нет графической сессии").wait_for()
+    assert (
+        page.evaluate(
+            "async()=>(await (await fetch('/state')).json()).labels['pc-01'].user"
+        )
+        is None
+    )
     login()
     page.wait_for_function(grid)
     page.get_by_role("button", name="desk-1 · " + first["monitorId"]).click()
