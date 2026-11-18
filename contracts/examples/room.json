@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "room",
+  "roomId": "lab-a",
+  "seats": [
+    {
+      "seatId": "desk-1",
+      "row": 1,
+      "column": 1,
+      "nodeId": "pc-01"
+    },
+    {
+      "seatId": "desk-2",
+      "row": 1,
+      "column": 2,
+      "nodeId": "pc-02"
+    }
+  ]
+}

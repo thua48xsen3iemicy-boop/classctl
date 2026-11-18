@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "kind": "status",
+  "nodeId": "pc-01",
+  "availability": "online",
+  "session": {
+    "sessionId": "login-7",
+    "layoutRevision": 1,
+    "monitors": [
+      {
+        "monitorId": "DP-1",
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "rotation": 0,
+        "mirrorGroup": null
+      },
+      {
+        "monitorId": "DP-2",
+        "x": 1920,
+        "y": 0,
+        "width": 1080,
+        "height": 1920,
+        "rotation": 90,
+        "mirrorGroup": null
+      }
+    ]
+  },
+  "preview": {
+    "state": "unchanged",
+    "lastFrameAt": "2026-11-18T08:57:00Z",
+    "lastVerifiedAt": "2026-11-18T09:00:00Z"
+  }
+}
