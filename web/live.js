@@ -127,6 +127,8 @@ async function openView(seat, id) {
   const ws = socket(control),
     peer = new RTCPeerConnection({ iceServers: state.iceServers });
   const active = { ws, peer, seat, signature: signature(seat) };
+  toggleDrawer(false);
+  document.querySelector(".picker").hidden = true;
   focus = active;
   clearGrid();
   el("grid").hidden = true;
@@ -289,8 +291,37 @@ function preview(seat, binding, m, outputs, onDisconnect) {
     ws.close();
   };
 }
+let hidden = new Set(), choiceSignature, storageKey;
+function toggleDrawer(open) {
+  el("choices-panel").hidden = !open;
+  el("tab").setAttribute("aria-expanded", String(open));
+}
+el("tab").onclick = () => toggleDrawer(el("choices-panel").hidden);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !el("choices-panel").hidden) {
+    toggleDrawer(false);
+    el("tab").focus();
+  }
+});
+
 function renderGrid() {
-  const seats = state.room.seats;
+    const key = "classctl.hiddenNodes." + state.room.roomId;
+    if (key !== storageKey) {
+      storageKey = key;
+      hidden = new Set();
+      try {
+        const saved = JSON.parse(localStorage.getItem(key));
+        if (Array.isArray(saved)) hidden = new Set(saved);
+      } catch {}
+    }
+  const computers = state.room.seats.filter(seat => seat.nodeId);
+  const visible = computers.filter(seat => !hidden.has(seat.nodeId));
+  updateChoices(computers, visible);
+  const seats = state.room.seats.filter(seat => !hidden.has(seat.nodeId));
+  document.querySelector(".picker").hidden = !computers.length;
+  const emptyMessage = "Все компьютеры скрыты. Выберите нужные в панели «Компьютеры».";
+  if (computers.length && !visible.length) el("notice").textContent = emptyMessage;
+  else if (el("notice").textContent === emptyMessage) el("notice").textContent = "";
   const grid = el("grid");
   const rows = [...new Set(seats.map((s) => s.row))].sort((a, b) => a - b);
   const cols = [...new Set(seats.map((s) => s.column))].sort((a, b) => a - b);
@@ -300,7 +331,11 @@ function renderGrid() {
     const binding = state.nodes[seat.nodeId];
     const sig = JSON.stringify([signature(seat), state.labels?.[seat.nodeId]]);
     const old = cards.get(seat.seatId);
-    if (old?.signature === sig) continue;
+    if (old) {
+      old.card.style.gridRow = rows.indexOf(seat.row) + 1;
+      old.card.style.gridColumn = cols.indexOf(seat.column) + 1;
+      if (old.signature === sig) continue;
+    }
     old?.stop();
     const card = document.createElement("article"),
       heading = document.createElement("h2");
@@ -317,6 +352,7 @@ function renderGrid() {
     card.append(outputs);
     const stops = [];
     const entry = {
+      card,
       signature: sig,
       stop() {
         stops.forEach((fn) => fn());
@@ -350,6 +386,28 @@ function renderGrid() {
       cards.delete(id);
     }
 }
+function updateChoices(seats, visible) {
+  const next = JSON.stringify([storageKey, seats, state.labels]);
+  if (next !== choiceSignature) {
+    el("choices").replaceChildren();
+    for (const seat of seats) {
+      const label = document.createElement("label");
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.checked = !hidden.has(seat.nodeId);
+      check.onchange = () => {
+        if (check.checked) hidden.delete(seat.nodeId);
+        else hidden.add(seat.nodeId);
+        try { localStorage.setItem(storageKey, JSON.stringify([...hidden])); } catch {}
+        renderGrid();
+      };
+      label.append(check, seat.seatId + " · " + (state.labels?.[seat.nodeId]?.hostname ?? seat.nodeId));
+      el("choices").append(label);
+    }
+    choiceSignature = next;
+  }
+  el("count").textContent = "Показано " + visible.length + " из " + seats.length;
+}
 async function poll() {
   try {
     const response = await fetch("/state", { cache: "no-store" });
@@ -365,6 +423,8 @@ async function poll() {
     if (!focus) renderGrid();
   } catch {
     state = null;
+    toggleDrawer(false);
+    document.querySelector(".picker").hidden = true;
     closeFocus();
     clearGrid();
     el("notice").textContent = "Аудитория недоступна";
