@@ -9,9 +9,19 @@
   <body>
     <main id="grid" aria-label="Рабочие места"></main>
     <section id="focus" hidden>
-      <nav>
-        <button id="back">← В грид</button><strong id="target"></strong
-        ><span id="mode" role="status"></span>
+      <nav id="tools" aria-label="Панель монитора">
+        <button
+          id="handle"
+          aria-label="Панель монитора"
+          aria-controls="drawer"
+          aria-expanded="false"
+        >
+          ‹
+        </button>
+        <div id="drawer" inert>
+          <strong id="target"></strong><span id="mode" role="status"></span>
+          <button id="back">← В аудиторию</button>
+        </div>
       </nav>
     </section>
     <p id="notice" role="status">Подключение…</p>

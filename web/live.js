@@ -18,6 +18,9 @@ function closeFocus() {
   if (!focus) return;
   const current = focus;
   focus = null;
+  setDrawer(false);
+  if (document.fullscreenElement === el("focus"))
+    document.exitFullscreen().catch(() => {});
   current.cleanup?.();
   current.ws.close();
   current.peer.close();
@@ -30,6 +33,45 @@ function back() {
   if (state) renderGrid();
 }
 el("back").onclick = back;
+function setDrawer(open) {
+  el("tools").classList.toggle("open", open);
+  el("handle").setAttribute("aria-expanded", String(open));
+  el("handle").textContent = open ? "›" : "‹";
+  el("drawer").inert = !open;
+}
+el("tools").onpointerenter = (e) => {
+  if (e.pointerType === "mouse") setDrawer(true);
+};
+el("tools").onpointerleave = (e) => {
+  if (
+    e.pointerType === "mouse" &&
+    !el("drawer").contains(document.activeElement)
+  )
+    setDrawer(false);
+};
+el("handle").onclick = (e) =>
+  setDrawer(
+    e.pointerType === "mouse" || !el("tools").classList.contains("open"),
+  );
+el("tools").onfocusout = (e) => {
+  if (!el("tools").contains(e.relatedTarget)) setDrawer(false);
+};
+document.addEventListener("fullscreenchange", () => {
+  if (!focus) return;
+  if (document.fullscreenElement === el("focus")) focus.fullscreen = true;
+  else if (focus.fullscreen) back();
+});
+document.addEventListener(
+  "keydown",
+  (e) => {
+    if (focus && e.key === "Escape") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      back();
+    }
+  },
+  true,
+);
 function signature(seat) {
   const node = state.nodes[seat.nodeId];
   return JSON.stringify([
@@ -49,6 +91,10 @@ async function openView(seat, id) {
   clearGrid();
   el("grid").hidden = true;
   el("focus").hidden = false;
+  // The browser requires user activation here, before any network await.
+  el("focus")
+    .requestFullscreen?.()
+    .catch(() => {});
   el("notice").textContent = "";
   el("target").textContent = seat.seatId + " · " + id;
   el("mode").textContent = "Подключение…";

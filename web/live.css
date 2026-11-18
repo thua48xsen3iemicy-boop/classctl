@@ -83,22 +83,51 @@ button:focus-visible,
 }
 #focus {
   height: 100dvh;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  position: relative;
+  overflow: hidden;
   background: #101713;
   color: #fff;
 }
-nav {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 3px 6px;
+#tools {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  top: 50%;
+  transform: translate(100%, -50%);
+  transition: transform 0.16s ease;
   background: #23352c;
+  border-radius: 6px 0 0 6px;
 }
-nav button {
+#tools.open {
+  transform: translate(0, -50%);
+}
+#drawer {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+#tools button {
   font: inherit;
   cursor: pointer;
-  padding: 3px 8px;
+  padding: 5px 9px;
+}
+#tools #handle {
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  color: white;
+  background: #23352c;
+  border: 0;
+  border-radius: 5px 0 0 5px;
+  font-size: 20px;
+  line-height: 1;
+  padding: 10px 5px;
+}
+@media (prefers-reduced-motion: reduce) {
+  #tools {
+    transition: none;
+  }
 }
 #focus video {
   width: 100%;

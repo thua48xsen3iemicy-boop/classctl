@@ -48,6 +48,10 @@ def check_dense_grid(context, origin, status):
         ws.on_message(lambda message: requests.append(json.loads(message)))
 
     page.route_web_socket("**/stream", stream)
+    # Simulate a managed browser that rejects the fullscreen request.
+    page.add_init_script(
+        "window.nativeFullscreen=Element.prototype.requestFullscreen;Element.prototype.requestFullscreen=()=>Promise.reject(new DOMException('Denied','NotAllowedError'))"
+    )
     try:
         page.goto(origin)
         page.wait_for_function("document.querySelectorAll('.monitor').length===50")
@@ -70,8 +74,52 @@ def check_dense_grid(context, origin, status):
         assert access["target"] == {"scope": "monitor", "monitorId": monitor}
         assert page.evaluate("""()=>{const r=document.querySelector('video').getBoundingClientRect();
             return r.width===innerWidth && r.height>innerHeight-55 && r.bottom===innerHeight}""")
-        page.get_by_role("button", name="← В грид").click()
+        assert page.evaluate(
+            "!document.fullscreenElement && document.querySelector('#drawer').inert"
+        )
+        handle = page.locator("#handle")
+        handle.hover()
+        page.wait_for_function("!document.querySelector('#drawer').inert")
+        page.mouse.move(20, 20)
+        page.wait_for_function("document.querySelector('#drawer').inert")
+        page.wait_for_timeout(200)
+        # Send a finger tap through Chromium's native touch input pipeline.
+        box = handle.bounding_box()
+        cdp = context.new_cdp_session(page)
+        cdp.send(
+            "Input.dispatchTouchEvent",
+            {
+                "type": "touchStart",
+                "touchPoints": [
+                    {
+                        "x": box["x"] + box["width"] / 2,
+                        "y": box["y"] + box["height"] / 2,
+                    }
+                ],
+            },
+        )
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        cdp.detach()
+        page.wait_for_function("!document.querySelector('#drawer').inert")
+        page.get_by_role("button", name="← В аудиторию").click()
         page.wait_for_function("document.querySelectorAll('.monitor').length===50")
+        state["room"]["seats"] = seats[:1]
+        nodes["pc-01"]["session"] = {
+            **status["session"],
+            "monitors": status["session"]["monitors"][:1],
+        }
+        page.wait_for_function("document.querySelectorAll('.monitor').length===1")
+        page.evaluate(
+            "Element.prototype.requestFullscreen=window.nativeFullscreen;void 0"
+        )
+        page.locator(".monitor").click()
+        page.wait_for_function(
+            "document.fullscreenElement===document.querySelector('#focus')"
+        )
+        page.evaluate("document.exitFullscreen()")
+        page.wait_for_function(
+            "document.querySelector('.monitor') && document.querySelector('#focus').hidden"
+        )
         print(
             "Layout fixture: 25 seats, 50 monitor cards, no scrolling; correct target and full-page video"
         )
@@ -238,7 +286,14 @@ def run(tmp, stack, x11):
           return [c.candidateType,c.protocol,c.relayProtocol]}"""),
             flush=True,
         )
-        page.get_by_text("← В грид").click()
+        page.wait_for_function(
+            "document.fullscreenElement===document.querySelector('#focus')"
+        )
+        if monitor is first:
+            page.keyboard.press("Escape")
+        else:
+            page.locator("#handle").hover()
+            page.get_by_text("← В аудиторию").click()
         assert page.evaluate("pcs.at(-1).connectionState==='closed'")
     if "--dummy-layout" in sys.argv:
         if [first["monitorId"], second["monitorId"]] != ["DUMMY0", "DUMMY1"]:
@@ -254,7 +309,9 @@ def run(tmp, stack, x11):
         try:
             page.get_by_role("button", name="desk-1 · DUMMY1").click()
             page.wait_for_function("document.querySelector('video')?.readyState>=2")
-            page.get_by_text("Управление включено", exact=True).wait_for()
+            page.wait_for_function(
+                "document.querySelector('#mode').textContent==='Управление включено'"
+            )
             randr("--addmode", "DUMMY0", "lab640")
             randr(
                 "--output",
