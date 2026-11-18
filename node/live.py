@@ -56,7 +56,7 @@ def active_seat(pid):
             prop("Active") == "b true"
             and prop("Remote") == "b false"
             and prop("Type") == 's "x11"'
-            and prop("Seat").startswith('so "seat0" ')
+            and prop("Seat").startswith('(so) "seat0" ')
         )
     except (OSError, subprocess.SubprocessError, IndexError):
         return False
