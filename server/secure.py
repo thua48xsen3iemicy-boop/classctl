@@ -31,11 +31,14 @@ class AccessPolicy:
         except (OSError, ValueError):
             return {}
 
-    def allowed(self, policy, fingerprint, request):
-        teacher = policy.get("teachers", {}).get(fingerprint, {})
+    def permissions(self, policy, subject):
+        teacher = policy.get("teachers", {}).get(subject, {})
+        return teacher.get("rooms", {}).get(self.room["roomId"], [])
+
+    def allowed(self, policy, subject, request):
         preview = request["kind"] == "preview.subscribe"
         mode = "view" if preview else request["mode"]
-        if mode not in teacher.get("rooms", {}).get(self.room["roomId"], []):
+        if mode not in self.permissions(policy, subject):
             return False
         node = self.nodes[request["nodeId"]]
         session = node.status["session"]

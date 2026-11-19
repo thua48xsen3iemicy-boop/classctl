@@ -25,9 +25,7 @@ def exercise(page, tmp, monitor):
 
     policy = tmp / "policy"
     config = json.loads(policy.read_text())
-    rooms = next(
-        t["rooms"] for t in config["teachers"].values() if "lab-a" in t["rooms"]
-    )
+    rooms = config["teachers"]["local"]["rooms"]
     page.get_by_role("button", name="desk-1 · DUMMY1").click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
     assert not page.get_by_text("Включить управление").count()
@@ -52,7 +50,7 @@ def exercise(page, tmp, monitor):
     assert page.evaluate("toolbarClicks.length===0")
     page.evaluate("delete sockets.at(-1).send")
     page.mouse.move(10, 10)
-    # A second grant to the same authenticated teacher must also be refused.
+    # A second control channel from the same portal must also be refused.
     assert await_second_denial(page, monitor)
     video = page.locator("video")
     box = video.bounding_box()
@@ -118,7 +116,7 @@ def await_second_denial(page, monitor):
     return page.evaluate(
         """async id=>{
       const state=await (await fetch('/state')).json(), s=state.nodes['pc-01'].session;
-      const ws=new WebSocket('wss://'+location.host+'/stream','classctl.input.v1');
+      const ws=new WebSocket('/stream','classctl.input.v1');
       return new Promise(resolve=>{
         const timer=setTimeout(()=>{ws.close();resolve(false)},2000);
         ws.onopen=()=>ws.send(JSON.stringify({request:{version:1,kind:'access',mode:'control',

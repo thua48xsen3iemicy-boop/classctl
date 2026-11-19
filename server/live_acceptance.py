@@ -1,11 +1,14 @@
-"""Real Chromium and disposable PKI, synthetic screens, optional local TURN."""
+"""Separate HTTP and mTLS listeners, plus optional real Chromium and screens."""
 
+import asyncio
 import json
 import os
 import pwd
 import secrets
 import shutil
 import socket
+import sqlite3
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -13,7 +16,13 @@ import time
 from contextlib import ExitStack
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from aiohttp import (
+    ClientConnectorError,
+    ClientError,
+    ClientSession,
+    ClientTimeout,
+    WSServerHandshakeError,
+)
 from access_acceptance import identities
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +32,59 @@ def port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+async def check_listeners(tmp, origin, agent_origin, contexts):
+    async with ClientSession(timeout=ClientTimeout(total=5)) as client:
+        for path in ("/", "/state"):
+            async with client.get(origin + path) as response:
+                assert response.status == 200
+                if path == "/":
+                    assert (
+                        response.headers["Content-Security-Policy"]
+                        == "frame-ancestors 'none'"
+                    )
+        async with client.get(
+            origin + "/state", headers={"Host": "other.example"}
+        ) as response:
+            assert response.status == 403
+        async with client.get(origin + "/source") as response:
+            assert response.status == 404
+        try:
+            async with client.get(origin.replace("127.0.0.1", "127.0.0.2")):
+                raise AssertionError("UI accepted a connection on another address")
+        except ClientConnectorError:
+            pass
+
+        for headers in ({}, {"Origin": "https://other.example"}):
+            try:
+                async with client.ws_connect(origin + "/stream", headers=headers):
+                    raise AssertionError("UI accepted a WebSocket with an invalid Origin")
+            except WSServerHandshakeError as error:
+                assert error.status == 403
+        async with client.ws_connect(origin + "/stream", origin=origin):
+            pass
+
+        pc = contexts["pc"]
+        for path in ("/", "/state", "/stream"):
+            async with client.get(agent_origin + path, ssl=pc) as response:
+                assert response.status == 404
+        try:
+            async with client.ws_connect(agent_origin + "/source", ssl=contexts["guest"]):
+                raise AssertionError("An unassigned certificate was accepted as an agent")
+        except WSServerHandshakeError as error:
+            assert error.status == 403
+        no_cert = ssl.create_default_context(cafile=tmp / "ca.pem")
+        try:
+            async with client.ws_connect(agent_origin + "/source", ssl=no_cert):
+                raise AssertionError("An agent connected without a client certificate")
+        except WSServerHandshakeError:
+            raise AssertionError("A connection without a certificate reached HTTP")
+        except ClientError:
+            pass
+        async with client.ws_connect(agent_origin + "/source", ssl=pc):
+            pass
+    print("T11: loopback UI, route separation, browser headers and agent mTLS OK")
 
 
 def check_dense_grid(context, origin, status):
@@ -148,7 +210,7 @@ def check_dense_grid(context, origin, status):
         page.close()
 
 
-def run(tmp, stack, x11):
+def run(tmp, stack, x11, listeners_only):
     def start(args):
         p = subprocess.Popen(args, cwd=tmp, stdout=subprocess.DEVNULL)
 
@@ -163,11 +225,19 @@ def run(tmp, stack, x11):
         stack.callback(stop)
         return p
 
-    identities(tmp)
-    api = port()
-    origin = f"https://localhost:{api}"
+    contexts, _ = identities(tmp)
+    policy_path = tmp / "policy"
+    policy = json.loads(policy_path.read_text())
+    policy["teachers"] = {"local": {"rooms": {"lab-a": ["view"]}}}
+    policy_path.write_text(json.dumps(policy))
+    agent_port = port()
+    ui_port = port()
+    while ui_port == agent_port:
+        ui_port = port()
+    agent_origin = f"https://localhost:{agent_port}"
+    origin = f"http://127.0.0.1:{ui_port}"
     ice = []
-    if shutil.which("turnserver"):
+    if not listeners_only and shutil.which("turnserver"):
         turn = port()
         password = secrets.token_urlsafe(12)
         start(
@@ -199,7 +269,7 @@ def run(tmp, stack, x11):
             )
         ]
     (tmp / "ice").write_text(json.dumps(ice))
-    start(
+    coordinator = start(
         [
             sys.executable,
             ROOT / "server/live.py",
@@ -215,10 +285,30 @@ def run(tmp, stack, x11):
             "localhost.key",
             "--ca",
             "ca.pem",
+            "--host",
+            "0.0.0.0",
             "--port",
-            str(api),
+            str(agent_port),
+            "--ui-port",
+            str(ui_port),
         ]
     )
+    for _ in range(100):
+        if coordinator.poll() is not None:
+            raise RuntimeError("Coordinator exited during startup")
+        try:
+            with socket.create_connection(("127.0.0.1", ui_port), timeout=0.1):
+                break
+        except OSError:
+            time.sleep(0.05)
+    else:
+        raise RuntimeError("UI listener did not start")
+    asyncio.run(check_listeners(tmp, origin, agent_origin, contexts))
+    if listeners_only:
+        return
+
+    from playwright.sync_api import sync_playwright
+
     start(
         [
             sys.executable,
@@ -229,7 +319,7 @@ def run(tmp, stack, x11):
             "--socket",
             tmp / "socket",
             "--server",
-            origin,
+            agent_origin,
             "--uid",
             str(os.getuid()),
             "--cert",
@@ -242,11 +332,7 @@ def run(tmp, stack, x11):
     )
     for _ in range(100):
         if (tmp / "socket").exists():
-            try:
-                with socket.create_connection(("127.0.0.1", api), timeout=0.1):
-                    break
-            except OSError:
-                pass
+            break
         time.sleep(0.05)
 
     def login():
@@ -268,14 +354,7 @@ def run(tmp, stack, x11):
         executable_path=shutil.which("chromium"), args=["--no-sandbox"]
     )
     stack.callback(browser.close)
-    ctx = browser.new_context(
-        ignore_https_errors=True,
-        client_certificates=[
-            dict(
-                origin=origin, certPath=tmp / "teacher.pem", keyPath=tmp / "teacher.key"
-            )
-        ],
-    )
+    ctx = browser.new_context()
     page = ctx.new_page()
     page.add_init_script("""window.sockets=[];window.WebSocket=class extends WebSocket{constructor(...a){super(...a);sockets.push(this)}};window.pcs=[];window.RTCPeerConnection=class extends RTCPeerConnection{
       constructor(...a){super(...a);pcs.push(this)}}""")
@@ -388,9 +467,12 @@ def run(tmp, stack, x11):
     page.wait_for_function(
         "pcs.at(-1).connectionState==='closed' && !document.querySelector('video') && !document.querySelector('canvas')"
     )
+    with sqlite3.connect(tmp / "db") as db:
+        subjects = db.execute("SELECT DISTINCT subject FROM audit").fetchall()
+    assert subjects == [("local",)]
     print("T05: grid, individual monitors, track closure, logout/login, revocation OK")
 
 
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
-        run(Path(directory), stack, "--x11" in sys.argv)
+        run(Path(directory), stack, "--x11" in sys.argv, "--listeners-only" in sys.argv)

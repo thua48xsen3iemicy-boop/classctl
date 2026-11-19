@@ -46,7 +46,7 @@ document.addEventListener("keydown", (event) => {
 });
 const socket = (control = false) =>
   new WebSocket(
-    "wss://" + location.host + "/stream",
+    "/stream",
     control ? "classctl.input.v1" : "classctl.preview.v1",
   );
 function clearGrid() {
