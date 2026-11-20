@@ -35,6 +35,11 @@ def check_input():
     for code in keys:
         validator.validate({"kind":"key","code":code,"down":True})
     validator.validate({"kind":"button","u":0,"v":0.99,"down":False,"button":0})
+    wheel = {"kind": "wheel", "steps": -2, "u": 0.5, "v": 0.5}
+    validator.validate(wheel)
+    for steps in (0, -9, 9, 1.5):
+        require(not validator.is_valid(dict(wheel, steps=steps)), "Приняты неверные шаги колеса")
+    require(not validator.is_valid(dict(wheel, u=1)), "Колесо принято за полем изображения")
     for event in [{"kind":"move","u":1,"v":0},{"kind":"key","down":True,"code":"Unknown"},
                   {"kind":"release","nodeId":"other"}]:
         require(not validator.is_valid(event),"Несовместимое событие ввода принято")

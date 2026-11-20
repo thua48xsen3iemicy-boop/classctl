@@ -71,6 +71,12 @@ class Relay(AccessPolicy):
                     if "control.monitor" in node.capabilities["features"]
                     and "control" in permissions
                 ],
+                wheelNodes=[
+                    ident
+                    for ident, node in self.nodes.items()
+                    if "control.wheel.v1" in node.capabilities["features"]
+                    and "control" in permissions
+                ],
             ),
             headers={"Cache-Control": "no-store"},
         )
@@ -118,10 +124,15 @@ class Relay(AccessPolicy):
                 ack = json.loads(msg.data)
                 if req.get("mode") == "control":
                     self.require_view()
+                    features = self.nodes[node_id].capabilities["features"]
                     if (
                         key in self.pending
                         or not self.allowed(self.policy(), subject, req)
                         or not INPUT.is_valid(ack)
+                        or (
+                            ack["kind"] == "wheel"
+                            and "control.wheel.v1" not in features
+                        )
                     ):
                         break
                     await source.send_json(dict(key=key, op="input", event=ack))

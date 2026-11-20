@@ -182,7 +182,11 @@ class Source:
             try:
                 probe = Controller()
                 probe.close()
-                self.control_features = ["control.monitor", "control.desktop"]
+                self.control_features = [
+                    "control.monitor",
+                    "control.desktop",
+                    "control.wheel.v1",
+                ]
             except Exception as error:
                 print(f"Ввод X11 недоступен: {error}", flush=True)
 

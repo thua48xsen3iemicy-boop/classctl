@@ -57,12 +57,18 @@ class Controller:
         if kind == "release":
             self.release()
             return
-        if kind in ("button", "move"):
+        if kind in ("button", "move", "wheel"):
             point = position(monitors, target, data["u"], data["v"])
             if point:
                 xtest.fake_input(self.display, X.MotionNotify, x=point[0], y=point[1])
-            elif kind == "move" or data["down"]:
+            elif kind != "button" or data["down"]:
                 return
+        if kind == "wheel":
+            steps = int(data["steps"])
+            button = 4 if steps < 0 else 5
+            for _ in range(abs(steps)):
+                xtest.fake_input(self.display, X.ButtonPress, button)
+                xtest.fake_input(self.display, X.ButtonRelease, button)
         if kind in ("button", "key"):
             code = (
                 data["button"] + 1
