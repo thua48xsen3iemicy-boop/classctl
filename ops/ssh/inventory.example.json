@@ -2,17 +2,15 @@
   "room": "lab-a",
   "dns": "classctl.school.lan",
   "port": 8767,
-  "coordinator": "admin@teacher-01",
+  "coordinator": "root@teacher-01",
   "students": [
     {
-      "ssh": "admin@pc-01",
-      "node": "pc-01",
-      "user": "student"
+      "ssh": "root@pc-01",
+      "node": "pc-01"
     },
     {
-      "ssh": "admin@pc-02",
-      "node": "pc-02",
-      "user": "student"
+      "ssh": "root@pc-02",
+      "node": "pc-02"
     }
   ],
   "ui_port": 8768,

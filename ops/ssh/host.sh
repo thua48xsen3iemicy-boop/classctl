@@ -44,6 +44,34 @@ EOF
         rc-service "$name" restart
     fi
 }
+session_desktop() {
+    local release=$1 node=$2
+    cat <<EOF
+[Desktop Entry]
+Type=Application
+Name=classctl — аудитория
+Exec=$release/.venv/bin/python $release/session/live.py --socket /run/classctl/seat0.sock --node $node
+OnlyShowIn=KDE;
+EOF
+}
+
+migrate_autostart() {
+    local launcher=$base/bin/node-start old_release old_uid old_node account user directory legacy
+    [[ -f $launcher ]] || return 0
+    old_uid=$(sed -nE 's/.* --uid ([1-9][0-9]*) --ca .*/\1/p' "$launcher")
+    [[ -n $old_uid ]] || return 0
+    old_release=$(sed -nE 's|^exec (/opt/classctl/[0-9a-f]+)/[.]venv/bin/python .*|\1|p' "$launcher")
+    old_node=$(sed -nE 's/.* --node ([A-Za-z0-9._-]+) --socket .*/\1/p' "$launcher")
+    [[ -n $old_release && -n $old_node ]] || return 0
+    account=$(getent passwd "$old_uid") || return 0
+    IFS=: read -r user _ _ _ _ directory _ <<< "$account"
+    legacy=$directory/.config/autostart/classctl.desktop
+    if runuser -u "$user" -- test -f "$legacy" &&
+        session_desktop "$old_release" "$old_node" | runuser -u "$user" -- cmp -s "$legacy" -; then
+        runuser -u "$user" -- rm -- "$legacy"
+    fi
+}
+
 case "$action" in
 prepare)
     role=$1
@@ -117,28 +145,19 @@ server)
     ;;
 student)
     release=$base/$1
-    user=$2 node=$3 url=$4
-    uid=$(id -u "$user")
-    home=$(getent passwd "$user" | cut -d: -f6)
-    [[ $uid != 0 && -d $home ]]
+    node=$2 url=$3
     "$release/.venv/bin/python" -c 'from PIL import features; import sys; sys.exit(0 if features.check_feature("xcb") else "Pillow requires XCB")'
     install -d -m 755 "$base/bin"
+    install -d -m 755 /etc/xdg/autostart
+    session_desktop "$release" "$node" > /etc/xdg/autostart/classctl.desktop
+    migrate_autostart
     cat > "$base/bin/node-start" <<EOF
 #!/bin/sh
 set -eu
 install -d -m 755 /run/classctl
-exec $release/.venv/bin/python $release/node/live.py --server $url --node $node --socket /run/classctl/seat0.sock --uid $uid --ca $etc/node/ca.pem --cert $etc/node/cert.pem --key $etc/node/key.pem
+exec $release/.venv/bin/python $release/node/live.py --server $url --node $node --socket /run/classctl/seat0.sock --ca $etc/node/ca.pem --cert $etc/node/cert.pem --key $etc/node/key.pem
 EOF
     chmod 755 "$base/bin/node-start"
-    # Write inside the home directory exclusively with that user's privileges.
-    runuser -u "$user" -- mkdir -p "$home/.config/autostart"
-    runuser -u "$user" -- tee "$home/.config/autostart/classctl.desktop" >/dev/null <<EOF
-[Desktop Entry]
-Type=Application
-Name=classctl — аудитория
-Exec=$release/.venv/bin/python $release/session/live.py --socket /run/classctl/seat0.sock --node $node
-OnlyShowIn=KDE;
-EOF
     service_install classctl-node root "$base/bin/node-start" ""
     ;;
 check)
