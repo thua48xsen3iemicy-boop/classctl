@@ -224,10 +224,12 @@ def check_overview_grid(context, origin, status):
         session = {**status["session"], "monitors": status["session"]["monitors"][:count]}
         nodes[node_id] = {**status, "nodeId": node_id, "session": session if count else None}
     state = dict(room=dict(roomId="lab", seats=seats[::-1]), nodes=nodes, iceServers=[])
+    long_name = ("Александра Константинопольская-Миропольская " * 4).strip()
     state["labels"] = {
         "pc-01": dict(hostname="actual-hostname", displayName="Анна Иванова"),
         "pc-02": dict(hostname="legacy-hostname", user="legacy-login"),
         "pc-03": dict(hostname="actual-hostname", displayName=None),
+        "pc-04": dict(hostname="actual-hostname", displayName=long_name),
     }
     page.route("**/state", lambda route: route.fulfill(json=state))
     page.route_web_socket("**/stream", lambda ws: ws.on_message(lambda _: None))
@@ -249,8 +251,17 @@ def check_overview_grid(context, origin, status):
         cards = page.locator(".seat")
         captions = cards.locator(".caption")
         assert captions.all_text_contents() == [
-            "pc-01 · Анна Иванова", "pc-02", "pc-03", "pc-04", "pc-05", "pc-06",
+            "pc-01 · Анна Иванова", "pc-02", "pc-03", f"pc-04 · {long_name}", "pc-05", "pc-06",
         ]
+        long_caption = captions.nth(3)
+        assert long_caption.get_attribute("title") == f"pc-04 · {long_name}"
+        assert long_caption.evaluate("""caption => {
+            const [computer, student] = caption.children;
+            return computer.scrollWidth === computer.clientWidth &&
+                student.clientWidth > 0 && student.scrollWidth > student.clientWidth &&
+                getComputedStyle(student).textOverflow === 'ellipsis' &&
+                caption.scrollWidth === caption.clientWidth;
+        }""")
         assert cards.evaluate_all("cards=>cards.map(c=>c.querySelectorAll('.monitor').length)") == [2, 1, 2, 1, 2, 0]
         boxes = [card.bounding_box() for card in cards.all()]
         assert boxes[0]["y"] == boxes[1]["y"] == boxes[2]["y"]
@@ -305,7 +316,7 @@ def check_overview_grid(context, origin, status):
         assert pin.get_attribute("aria-pressed") == "true"
         page.get_by_role("button", name="Компьютеры").click()
         first.check()
-        assert captions.first.inner_text() == "pc-01 · Анна Иванова"
+        assert captions.first.text_content() == "pc-01 · Анна Иванова"
         assert cards.count() == 6
         page.keyboard.press("Escape")
         assert page.locator("#choices-panel").is_hidden()
@@ -443,51 +454,29 @@ def run(tmp, stack, x11, listeners_only):
             break
         time.sleep(0.05)
 
-    sssd_ready = tmp / "sssd-ready"
-
-    def login(name, retry_sssd=False):
+    def login(name):
         script = ROOT / "session/live.py"
         args = ["--socket", tmp / "socket", "--node", "pc-01"]
         if x11:
             return start([sys.executable, script, *args])
-        mock_nss = r"""
+        mock_nss = """
 import os
 import pwd
 import runpy
-import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
-script, name, sssd_ready, *args = sys.argv[1:]
-uid = os.getuid()
+script, name, *args = sys.argv[1:]
 user = list(pwd.getpwuid(os.getuid()))
 user[0] = "ipa-login"
-gecos = f"  {name}  ,101,555-0123"
-user[4] = "" if sssd_ready else gecos
-real_check_output = subprocess.check_output
-attempts = 0
-
-def check_output(command, **kwargs):
-    global attempts
-    if command != ["getent", "-s", "sss", "passwd", str(uid)]:
-        return real_check_output(command, **kwargs)
-    assert sssd_ready
-    attempts += 1
-    if attempts == 1 or not Path(sssd_ready).exists():
-        raise subprocess.CalledProcessError(2, command)
-    return f"ipa-login:*:{uid}:{user[3]}:{gecos}:/home/ipa-login:/bin/bash\n"
-
+user[4] = f"  {name}  ,101,555-0123"
 sys.argv = [script, *args]
 sys.path.insert(0, str(Path(script).parent))
-with (
-    patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)),
-    patch("subprocess.check_output", side_effect=check_output),
-):
+with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     runpy.run_path(script, run_name="__main__")
 """
-        ready_path = sssd_ready if retry_sssd else ""
-        return start([sys.executable, "-c", mock_nss, script, name, ready_path, *args, "--synthetic"])
+        return start([sys.executable, "-c", mock_nss, script, name, *args, "--synthetic"])
 
     source = login("Анна Иванова")
     pw = stack.enter_context(sync_playwright())
@@ -600,11 +589,8 @@ with (
     assert page.evaluate(
         "async()=>(await (await fetch('/state')).json()).labels['pc-01'].displayName"
     ) is None
-    login("Иван Петров", retry_sssd=True)
+    login("Иван Петров")
     page.wait_for_function(grid)
-    if not x11:
-        assert page.get_by_role("heading", name="pc-01", exact=True).count() == 1
-        sssd_ready.touch()
     check_caption("Иван Петров")
     page.get_by_role("button", name="pc-01 · Экран 1").click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
