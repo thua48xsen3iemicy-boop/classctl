@@ -109,26 +109,27 @@ prepare)
     ;;
 release)
     release=$base/$1
+    if [[ -e $release/.ready && -d $release/.venv && ! -L $release/.venv ]]; then
+        # Keep the existing environment for releases created by the old installer.
+        exit 0
+    fi
     if [[ ! -e $release/.ready ]]; then
         if [[ ! -d $release/.git ]]; then
             git clone --no-checkout "$var/$1.bundle" "$release"
         fi
         git -C "$release" checkout --detach "$1"
-        "$(python_bin)" -m venv "$release/.venv"
-        (
-            if [[ -v classctl_pip_proxy ]]; then
-                export PIP_PROXY="$classctl_pip_proxy"
-            fi
-            if [[ -v classctl_pip_index_url ]]; then
-                export PIP_INDEX_URL="$classctl_pip_index_url"
-            fi
-            if [[ -v classctl_pip_trusted_host ]]; then
-                export PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:+$PIP_TRUSTED_HOST }$classctl_pip_trusted_host"
-            fi
-            "$release/.venv/bin/pip" install -r "$release/ops/requirements-live.txt" >&2
-        )
-        touch "$release/.ready"
     fi
+    if [[ -v classctl_pip_proxy ]]; then
+        export PIP_PROXY="$classctl_pip_proxy"
+    fi
+    if [[ -v classctl_pip_index_url ]]; then
+        export PIP_INDEX_URL="$classctl_pip_index_url"
+    fi
+    if [[ -v classctl_pip_trusted_host ]]; then
+        export PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:+$PIP_TRUSTED_HOST }$classctl_pip_trusted_host"
+    fi
+    "$(python_bin)" "$release/ops/ssh/prepare_venv.py" "$release" "$base/venvs" >&2
+    touch "$release/.ready"
     ;;
 csr)
     folder=$1
