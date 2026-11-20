@@ -89,8 +89,12 @@ class Relay(AccessPolicy):
         subject = LOCAL_SUBJECT
         if request.headers.get("Origin") != "http://" + request.host:
             raise web.HTTPForbidden()
+        # A monitor switch opens its next channel after the previous socket closes.
+        # Acknowledge the close only after releasing the channel in finally.
         ws = web.WebSocketResponse(
-            protocols=["classctl.input.v1", "classctl.preview.v1"], heartbeat=5
+            protocols=["classctl.input.v1", "classctl.preview.v1"],
+            heartbeat=5,
+            autoclose=False,
         )
         await ws.prepare(request)
         key = secrets.token_urlsafe(24)
@@ -153,11 +157,13 @@ class Relay(AccessPolicy):
         finally:
             self.pending.pop(key, None)
             channel = self.channels.pop(key, None)
-            if channel:
-                self.audit(subject, "close", channel[3], "closed")
-                if not channel[1].closed:
-                    await channel[1].send_json(dict(key=key, op="close"))
-            await ws.close()
+            try:
+                if channel:
+                    self.audit(subject, "close", channel[3], "closed")
+                    if not channel[1].closed:
+                        await channel[1].send_json(dict(key=key, op="close"))
+            finally:
+                await ws.close()
         return ws
 
     async def source(self, request):

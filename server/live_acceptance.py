@@ -164,8 +164,22 @@ def check_dense_grid(context, origin, status):
             "!document.fullscreenElement && document.querySelector('#drawer').inert"
         )
         handle = page.locator("#handle")
+        assert handle.evaluate("""handle => {
+            const r = handle.getBoundingClientRect();
+            return r.left === 0 && r.top + r.height / 2 === innerHeight / 2;
+        }""")
         handle.hover()
         page.wait_for_function("!document.querySelector('#drawer').inert")
+        page.get_by_role("button", name="Другой монитор").click()
+        for _ in range(100):
+            access_requests = [m["request"] for m in requests if m["request"]["kind"] == "access"]
+            if len(access_requests) == 2:
+                break
+            page.wait_for_timeout(50)
+        assert access_requests[1] == {
+            **access,
+            "target": {"scope": "monitor", "monitorId": status["session"]["monitors"][0]["monitorId"]},
+        }
         page.mouse.move(20, 20)
         page.wait_for_function("document.querySelector('#drawer').inert")
         page.wait_for_timeout(200)
@@ -202,6 +216,7 @@ def check_dense_grid(context, origin, status):
         page.wait_for_function(
             "document.fullscreenElement===document.querySelector('#focus')"
         )
+        assert page.locator("#swap").evaluate("button => button.hidden")
         page.evaluate("document.exitFullscreen()")
         page.wait_for_function(
             "document.querySelector('.monitor') && document.querySelector('#focus').hidden"
@@ -288,6 +303,10 @@ def check_overview_grid(context, origin, status):
         page.set_viewport_size(dict(width=1366, height=768))
 
         handle = page.get_by_role("button", name="Меню аудитории")
+        assert handle.evaluate("""handle => {
+            const r = handle.getBoundingClientRect();
+            return r.left === 0 && r.top + r.height / 2 === innerHeight / 2;
+        }""")
         pin = page.get_by_role("button", name="Закрепить панель")
         viewport = page.locator("#viewport")
         grid_width = viewport.bounding_box()["width"]
@@ -509,14 +528,17 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     check_overview_grid(ctx, origin, status)
     check_dense_grid(ctx, origin, status)
     first, second = monitors
-    for index, monitor in enumerate((first, second), 1):
-        label = "pc-01 · " + monitor["monitorId"]
-        w, h = monitor["width"], monitor["height"]
-        page.get_by_role("button", name=f"pc-01 · Экран {index}").click()
+
+    def wait_for_video(monitor):
         page.wait_for_function(
             "([w,h])=>{const v=document.querySelector('video');return v&&v.readyState>=2&&v.videoWidth===w&&v.videoHeight===h}",
-            arg=[w, h],
+            arg=[monitor["width"], monitor["height"]],
         )
+
+    for index, monitor in enumerate((first, second), 1):
+        label = "pc-01 · " + monitor["monitorId"]
+        page.get_by_role("button", name=f"pc-01 · Экран {index}").click()
+        wait_for_video(monitor)
         print(
             label,
             page.evaluate("""async()=>{
@@ -529,6 +551,16 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
             "document.fullscreenElement===document.querySelector('#focus')"
         )
         if monitor is first:
+            page.locator("#handle").hover()
+            swap = page.get_by_role("button", name="Другой монитор")
+            for target in (second, first):
+                swap.click()
+                wait_for_video(target)
+                assert page.locator("#target").inner_text() == "pc-01 · " + target["monitorId"]
+                assert page.evaluate("""() =>
+                    document.fullscreenElement === document.querySelector('#focus') &&
+                    pcs.at(-2).connectionState === 'closed' &&
+                    !document.querySelector('#grid canvas')""")
             page.keyboard.press("Escape")
         else:
             page.locator("#handle").hover()

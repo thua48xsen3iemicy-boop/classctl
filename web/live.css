@@ -64,7 +64,8 @@ body {
 #sidebar #sidebar-handle {
   position: absolute;
   left: 100%;
-  top: 8px;
+  top: 50%;
+  transform: translateY(-50%);
   width: var(--sidebar-handle-width);
   height: 40px;
   padding: 0;
@@ -241,12 +242,12 @@ button:focus-visible,
 #tools {
   position: absolute;
   z-index: 1;
-  right: 0;
+  left: 0;
   top: 50%;
-  transform: translate(100%, -50%);
+  transform: translate(-100%, -50%);
   transition: transform 0.16s ease;
   background: #23352c;
-  border-radius: 6px 0 0 6px;
+  border-radius: 0 6px 6px 0;
 }
 #tools.open {
   transform: translate(0, -50%);
@@ -263,13 +264,13 @@ button:focus-visible,
 }
 #tools #handle {
   position: absolute;
-  right: 100%;
+  left: 100%;
   top: 50%;
   transform: translateY(-50%);
   color: white;
   background: #23352c;
   border: 0;
-  border-radius: 5px 0 0 5px;
+  border-radius: 0 5px 5px 0;
   font-size: 20px;
   line-height: 1;
   padding: 10px 5px;
