@@ -10,10 +10,12 @@ import pwd
 import re
 import socket
 import subprocess
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
 from fractions import Fraction
+from pathlib import Path
 
 from aiohttp import ClientError, ClientSession, UnixConnector, WSMsgType
 from aiortc import (
@@ -445,11 +447,51 @@ async def run(args):
                     await s.close(key)
 
 
+async def reconnect(args):
+    while True:
+        try:
+            await run(args)
+        except (OSError, ClientError, subprocess.SubprocessError):
+            pass
+        await asyncio.sleep(1)
+
+
+async def wait_for_release(link, current):
+    while True:
+        try:
+            release = link.resolve(strict=True)
+        except (OSError, RuntimeError):
+            pass
+        else:
+            if release != current:
+                return release
+        await asyncio.sleep(1)
+
+
+async def run_until_update(args):
+    if args.release_link is None:
+        await reconnect(args)
+        return None
+    current = Path(__file__).resolve().parents[1]
+    connection = asyncio.create_task(reconnect(args))
+    update = asyncio.create_task(wait_for_release(args.release_link, current))
+    try:
+        done, _ = await asyncio.wait((connection, update), return_when=asyncio.FIRST_COMPLETED)
+        if connection in done:
+            connection.result()
+        return update.result()
+    finally:
+        connection.cancel()
+        update.cancel()
+        await asyncio.gather(connection, update, return_exceptions=True)
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--socket", required=True)
     p.add_argument("--node", required=True)
     p.add_argument("--synthetic", action="store_true")
+    p.add_argument("--release-link", type=Path)
     args = p.parse_args()
 
     # aiortc 1.14.0 has no public bitrate setting for its VP8 sender.
@@ -458,12 +500,8 @@ if __name__ == "__main__":
     vpx.MIN_BITRATE = 2_000_000
     vpx.MAX_BITRATE = 8_000_000
 
-    async def reconnect():
-        while True:
-            try:
-                await run(args)
-            except (OSError, ClientError, subprocess.SubprocessError):
-                pass
-            await asyncio.sleep(1)
-
-    asyncio.run(reconnect())
+    release = asyncio.run(run_until_update(args))
+    if release is not None:
+        python = release / ".venv/bin/python"
+        script = release / "session/live.py"
+        os.execv(python, [str(python), str(script), *sys.argv[1:]])

@@ -47,12 +47,12 @@ EOF
     fi
 }
 session_desktop() {
-    local release=$1 node=$2
+    local exec_line=$1
     cat <<EOF
 [Desktop Entry]
 Type=Application
 Name=classctl — аудитория
-Exec=$release/.venv/bin/python $release/session/live.py --socket /run/classctl/seat0.sock --node $node
+Exec=$exec_line
 OnlyShowIn=KDE;
 EOF
 }
@@ -69,7 +69,8 @@ migrate_autostart() {
     IFS=: read -r user _ _ _ _ directory _ <<< "$account"
     legacy=$directory/.config/autostart/classctl.desktop
     if runuser -u "$user" -- test -f "$legacy" &&
-        session_desktop "$old_release" "$old_node" | runuser -u "$user" -- cmp -s "$legacy" -; then
+        session_desktop "$old_release/.venv/bin/python $old_release/session/live.py --socket /run/classctl/seat0.sock --node $old_node" |
+            runuser -u "$user" -- cmp -s "$legacy" -; then
         runuser -u "$user" -- rm -- "$legacy"
     fi
 }
@@ -174,8 +175,14 @@ student)
     "$release/.venv/bin/python" -c 'from PIL import features; import sys; sys.exit(0 if features.check_feature("xcb") else "Pillow requires XCB")'
     install -d -m 755 "$base/bin"
     install -d -m 755 /etc/xdg/autostart
-    session_desktop "$release" "$node" > /etc/xdg/autostart/classctl.desktop
     migrate_autostart
+    cat > "$base/bin/session-start" <<EOF
+#!/bin/sh
+set -eu
+release=\$(readlink -f "$base/current-session")
+exec "\$release/.venv/bin/python" "\$release/session/live.py" --socket /run/classctl/seat0.sock --node $node --release-link "$base/current-session"
+EOF
+    chmod 755 "$base/bin/session-start"
     cat > "$base/bin/node-start" <<EOF
 #!/bin/sh
 set -eu
@@ -184,6 +191,11 @@ exec $release/.venv/bin/python $release/node/live.py --server $url --node $node 
 EOF
     chmod 755 "$base/bin/node-start"
     service_install classctl-node root "$base/bin/node-start" ""
+    staging=$(mktemp -d "$base/.session-release.XXXXXX")
+    ln -s "$release" "$staging/current-session"
+    mv -Tf "$staging/current-session" "$base/current-session"
+    rmdir "$staging"
+    session_desktop "$base/bin/session-start" > /etc/xdg/autostart/classctl.desktop
     ;;
 check)
     url=$1
