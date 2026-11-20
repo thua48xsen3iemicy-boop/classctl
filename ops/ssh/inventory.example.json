@@ -4,6 +4,7 @@
   "port": 8767,
   "coordinator": "root@teacher-01",
   "pip_proxy": null,
+  "pip_index_url": null,
   "students": [
     {
       "ssh": "root@pc-01",
