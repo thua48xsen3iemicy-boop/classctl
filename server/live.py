@@ -5,9 +5,11 @@ import asyncio
 import hashlib
 import json
 import secrets
+import signal
 import sqlite3
 import ssl
 import time
+from contextlib import AsyncExitStack
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
@@ -15,6 +17,8 @@ from aiohttp import WSMsgType, web
 from secure import AccessPolicy, CONTRACTS, Node, PREVIEW, inventory, validate
 
 ROOT = CONTRACTS.parent
+UI_HOST = "127.0.0.1"
+LOCAL_SUBJECT = "local"
 
 INPUT = Draft202012Validator(
     json.loads((CONTRACTS / "input-v1.schema.json").read_text())
@@ -38,16 +42,14 @@ class Relay(AccessPolicy):
         self.pending = {}
         self.ice = json.loads(Path(args.ice).read_text()) if args.ice else []
 
-    def teacher(self, request):
-        subject = identity(request)
-        if "view" not in self.policy().get("teachers", {}).get(subject, {}).get(
-            "rooms", {}
-        ).get(self.room["roomId"], []):
+    def require_view(self):
+        permissions = self.permissions(self.policy(), LOCAL_SUBJECT)
+        if "view" not in permissions:
             raise web.HTTPForbidden()
-        return subject
+        return permissions
 
     async def state(self, request):
-        subject = self.teacher(request)
+        permissions = self.require_view()
         return web.json_response(
             dict(
                 room=self.room,
@@ -67,20 +69,16 @@ class Relay(AccessPolicy):
                     ident
                     for ident, node in self.nodes.items()
                     if "control.monitor" in node.capabilities["features"]
-                    and "control"
-                    in self.policy()
-                    .get("teachers", {})
-                    .get(subject, {})
-                    .get("rooms", {})
-                    .get(self.room["roomId"], [])
+                    and "control" in permissions
                 ],
             ),
             headers={"Cache-Control": "no-store"},
         )
 
     async def browser(self, request):
-        subject = self.teacher(request)
-        if request.headers.get("Origin") != "https://" + request.host:
+        self.require_view()
+        subject = LOCAL_SUBJECT
+        if request.headers.get("Origin") != "http://" + request.host:
             raise web.HTTPForbidden()
         ws = web.WebSocketResponse(
             protocols=["classctl.input.v1", "classctl.preview.v1"], heartbeat=5
@@ -119,7 +117,7 @@ class Relay(AccessPolicy):
                     break
                 ack = json.loads(msg.data)
                 if req.get("mode") == "control":
-                    self.teacher(request)
+                    self.require_view()
                     if (
                         key in self.pending
                         or not self.allowed(self.policy(), subject, req)
@@ -279,11 +277,7 @@ class Relay(AccessPolicy):
                     if (
                         self.allowed(policy, teacher, req)
                         and not source.closed
-                        and "view"
-                        in policy.get("teachers", {})
-                        .get(teacher, {})
-                        .get("rooms", {})
-                        .get(self.room["roomId"], [])
+                        and "view" in self.permissions(policy, teacher)
                     ):
                         try:
                             await asyncio.wait_for(
@@ -298,7 +292,6 @@ class Relay(AccessPolicy):
         yield
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-        self.db.close()
 
 
 def matches(message, request):
@@ -310,29 +303,31 @@ def identity(request):
     return hashlib.sha256(cert).hexdigest()
 
 
-def main():
-    p = argparse.ArgumentParser()
-    for name in ("db", "policy", "cert", "key", "ca"):
-        p.add_argument("--" + name, required=True)
-    p.add_argument("--ice")
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8767)
-    args = p.parse_args()
-    relay = Relay(args)
-    app = web.Application()
+@web.middleware
+async def check_ui_host(request, handler):
+    port = request.transport.get_extra_info("sockname")[1]
+    host = UI_HOST if port == 80 else f"{UI_HOST}:{port}"
+    if request.headers.get("Host") != host:
+        raise web.HTTPForbidden()
+    return await handler(request)
+
+
+def ui_app(relay):
+    app = web.Application(middlewares=[check_ui_host])
     app.cleanup_ctx.append(relay.watch)
     app.add_routes(
         [
             web.get("/state", relay.state),
-            web.get("/source", relay.source),
             web.get("/stream", relay.browser),
         ]
     )
 
     def serve(path):
         async def file(request):
-            relay.teacher(request)
-            return web.FileResponse(path)
+            relay.require_view()
+            return web.FileResponse(
+                path, headers={"Content-Security-Policy": "frame-ancestors 'none'"}
+            )
 
         return file
 
@@ -345,11 +340,46 @@ def main():
         "/receiver.mjs": "contracts/preview/receiver.mjs",
     }.items():
         app.router.add_get(url, serve(ROOT / path))
+    return app
+
+
+async def run(args):
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     tls.load_cert_chain(args.cert, args.key)
     tls.load_verify_locations(args.ca)
     tls.verify_mode = ssl.CERT_REQUIRED
-    web.run_app(app, host=args.host, port=args.port, ssl_context=tls)
+    relay = Relay(args)
+    sources = web.Application()
+    sources.router.add_get("/source", relay.source)
+    stop = asyncio.Event()
+    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stop.set)
+    async with AsyncExitStack() as stack:
+        stack.callback(relay.db.close)
+        source_runner = web.AppRunner(sources, shutdown_timeout=5)
+        stack.push_async_callback(source_runner.cleanup)
+        await source_runner.setup()
+        ui_runner = web.AppRunner(ui_app(relay), shutdown_timeout=5)
+        stack.push_async_callback(ui_runner.cleanup)
+        await ui_runner.setup()
+        await web.TCPSite(source_runner, args.host, args.port, ssl_context=tls).start()
+        await web.TCPSite(ui_runner, UI_HOST, args.ui_port).start()
+        print(f"Портал преподавателя: http://{UI_HOST}:{args.ui_port}", flush=True)
+        await stop.wait()
+
+
+def main():
+    p = argparse.ArgumentParser()
+    for name in ("db", "policy", "cert", "key", "ca"):
+        p.add_argument("--" + name, required=True)
+    p.add_argument("--ice")
+    p.add_argument("--host", default=UI_HOST, help="Agent listener address")
+    p.add_argument("--port", type=int, default=8767, help="Agent mTLS port")
+    p.add_argument("--ui-port", type=int, default=8768, help="Loopback HTTP port")
+    args = p.parse_args()
+    try:
+        asyncio.run(run(args))
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
