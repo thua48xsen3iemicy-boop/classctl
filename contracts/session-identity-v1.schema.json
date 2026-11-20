@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["op", "sessionId", "hostname"],
+  "properties": {
+    "op": { "const": "identity" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "hostname": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "user": { "$ref": "#/$defs/optionalName" },
+    "displayName": { "$ref": "#/$defs/optionalName" }
+  },
+  "$defs": {
+    "optionalName": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 255
+    }
+  }
+}

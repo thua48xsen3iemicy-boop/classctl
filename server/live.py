@@ -23,6 +23,9 @@ LOCAL_SUBJECT = "local"
 INPUT = Draft202012Validator(
     json.loads((CONTRACTS / "input-v1.schema.json").read_text())
 )
+SESSION_IDENTITY = Draft202012Validator(
+    json.loads((CONTRACTS / "session-identity-v1.schema.json").read_text())
+)
 
 
 class Relay(AccessPolicy):
@@ -50,20 +53,20 @@ class Relay(AccessPolicy):
 
     async def state(self, request):
         permissions = self.require_view()
+        labels = {}
+        for ident, label in self.labels.items():
+            session = self.nodes[ident].status["session"]
+            active = session and session["sessionId"] == label["sessionId"]
+            labels[ident] = dict(
+                hostname=label["hostname"],
+                user=label["user"] if active else None,
+                displayName=label["displayName"] if active else None,
+            )
         return web.json_response(
             dict(
                 room=self.room,
                 nodes={k: n.status for k, n in self.nodes.items()},
-                labels={
-                    ident: dict(
-                        hostname=label["hostname"],
-                        user=label["user"]
-                        if label["sessionId"]
-                        == (self.nodes[ident].status["session"] or {}).get("sessionId")
-                        else None,
-                    )
-                    for ident, label in self.labels.items()
-                },
+                labels=labels,
                 iceServers=self.ice,
                 controlNodes=[
                     ident
@@ -189,19 +192,13 @@ class Relay(AccessPolicy):
                         if (
                             session
                             and session["sessionId"] == data.get("sessionId")
-                            and all(
-                                isinstance(data.get(k), str) and 0 < len(data[k]) <= 255
-                                for k in (
-                                    ("hostname",)
-                                    if data.get("user") is None
-                                    else ("hostname", "user")
-                                )
-                            )
+                            and SESSION_IDENTITY.is_valid(data)
                         ):
                             self.labels[ident] = dict(
                                 sessionId=session["sessionId"],
                                 hostname=data["hostname"],
                                 user=data.get("user"),
+                                displayName=data.get("displayName"),
                             )
                         continue
                     if data.get("op") == "redeem":
