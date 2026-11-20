@@ -80,16 +80,21 @@ def outputs(fake):
     return monitors
 
 
-def capture(monitors, target, fake):
-    selected = [m for m in monitors if target is None or m["monitorId"] == target]
+def bounds(selected):
     x = min(m["x"] for m in selected)
     y = min(m["y"] for m in selected)
     right = max(m["x"] + m["width"] for m in selected)
     bottom = max(m["y"] + m["height"] for m in selected)
+    return x, y, right, bottom
+
+
+def capture(monitors, target, fake):
+    selected = [m for m in monitors if target is None or m["monitorId"] == target]
+    x, y, right, bottom = bounds(selected)
     if not fake:
         return ImageGrab.grab(
             bbox=(x, y, right, bottom), xdisplay=os.environ["DISPLAY"]
-        ).convert("RGB")
+        )
     image = Image.new("RGB", (right - x, bottom - y))
     draw = ImageDraw.Draw(image)
     for m in selected:
@@ -105,6 +110,29 @@ def capture(monitors, target, fake):
             font_size=24,
         )
     return image
+
+
+def capture_previews(monitors, fake, previous):
+    desktop = capture(monitors, None, fake)
+    left, top, _, _ = bounds(monitors)
+    previews = {}
+    for monitor in monitors:
+        x, y = monitor["x"] - left, monitor["y"] - top
+        image = desktop
+        if len(monitors) > 1:
+            image = desktop.crop((x, y, x + monitor["width"], y + monitor["height"]))
+        image.thumbnail((320, 180))
+        pixels = image.size, image.tobytes()
+        monitor_id = monitor["monitorId"]
+        cached = previous.get(monitor_id)
+        if cached is not None and cached[0] == pixels:
+            previews[monitor_id] = cached
+            continue
+        buf = io.BytesIO()
+        image.save(buf, "JPEG", quality=75)
+        data = buf.getvalue()
+        previews[monitor_id] = pixels, data, hashlib.sha256(data).digest()
+    return previews
 
 
 class ScreenTrack(VideoStreamTrack):
@@ -218,8 +246,13 @@ class Source:
             await asyncio.sleep(0.6)
 
     async def frames(self):
+        previews = {}
+        revision = self.rev
         while True:
+            pending = []
             for key, c in list(self.channels.items()):
+                if self.channels.get(key) is not c:
+                    continue
                 if (
                     min(c["until"], c.get("inputUntil", float("inf")))
                     <= time.monotonic()
@@ -229,17 +262,32 @@ class Source:
                     continue
                 if "peer" in c or c["awaiting"]:
                     continue
+                pending.append((key, c))
+            if revision != self.rev:
+                previews = {}
+                revision = self.rev
+            pending = [
+                (key, c)
+                for key, c in pending
+                if self.channels.get(key) is c and c["req"]["layoutRevision"] == revision
+            ]
+            if pending:
+                targets = {c["req"]["monitorId"] for _, c in pending}
+                monitors = [m for m in self.monitors if m["monitorId"] in targets]
                 captured = stamp()
-                image = await asyncio.to_thread(self.image, c)
-                if self.channels.get(key) is not c:
+                previews = await asyncio.to_thread(
+                    capture_previews, monitors, self.args.synthetic, previews
+                )
+            for key, c in pending:
+                if (
+                    revision != self.rev
+                    or self.channels.get(key) is not c
+                    or time.monotonic() >= c["until"]
+                ):
                     continue
                 self.check(c)
-                image.thumbnail((320, 180))
-                buf = io.BytesIO()
-                image.save(buf, "JPEG", quality=75)
-                data = buf.getvalue()
-                digest = hashlib.sha256(data).digest()
                 req = c["req"]
+                _, data, digest = previews[req["monitorId"]]
                 c.update(
                     checked=time.monotonic(),
                     checkedAt=captured,
