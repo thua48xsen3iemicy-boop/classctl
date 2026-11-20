@@ -119,6 +119,9 @@ release)
             if [[ -v classctl_pip_proxy ]]; then
                 export PIP_PROXY="$classctl_pip_proxy"
             fi
+            if [[ -v classctl_pip_index_url ]]; then
+                export PIP_INDEX_URL="$classctl_pip_index_url"
+            fi
             "$release/.venv/bin/pip" install -r "$release/ops/requirements-live.txt" >&2
         )
         touch "$release/.ready"

@@ -35,11 +35,13 @@ def privilege(host):
     return () if remote(host, "id", "-u").strip() == b"0" else ("sudo", "-n")
 
 
-def worker(host, *args, pip_proxy=None):
+def worker(host, *args, pip_proxy=None, pip_index_url=None):
     script = (HERE / "host.sh").read_bytes()
-    if pip_proxy is not None:
-        # Send the proxy through SSH stdin so credentials stay out of command arguments.
-        script = f"classctl_pip_proxy={shlex.quote(pip_proxy)}\n".encode() + script
+    # Send URLs through SSH stdin so credentials stay out of command arguments.
+    settings = {"classctl_pip_proxy": pip_proxy, "classctl_pip_index_url": pip_index_url}
+    prefix = "".join(f"{key}={shlex.quote(value)}\n"
+                     for key, value in settings.items() if value is not None)
+    script = prefix.encode() + script
     return remote(host, *privilege(host), "bash", "-s", "--", *args, data=script)
 
 
@@ -59,14 +61,14 @@ def token(value, pattern):
         raise ValueError(f"Invalid inventory value: {value!r}")
 
 
-def validate_pip_proxy(proxy):
-    if proxy is None:
+def validate_pip_url(field, value):
+    if value is None:
         return
-    message = "pip_proxy must be an HTTP or HTTPS proxy URL, or null"
-    if not isinstance(proxy, str) or any(c.isspace() or not c.isprintable() for c in proxy):
+    message = f"{field} must be an HTTP or HTTPS URL, or null"
+    if not isinstance(value, str) or any(c.isspace() or not c.isprintable() for c in value):
         raise ValueError(message)
     try:
-        url = urlsplit(proxy)
+        url = urlsplit(value)
         valid = url.scheme in ("http", "https") and url.hostname and url.port != 0
     except ValueError:
         raise ValueError(message) from None
@@ -75,7 +77,8 @@ def validate_pip_proxy(proxy):
 
 
 def validate(cfg):
-    validate_pip_proxy(cfg.get("pip_proxy"))
+    for field in ("pip_proxy", "pip_index_url"):
+        validate_pip_url(field, cfg.get(field))
     name = r"[A-Za-z0-9][A-Za-z0-9._-]*"
     target = rf"(?:{name}@)?{name}"
     token(cfg["coordinator"], target)
@@ -164,7 +167,8 @@ def deploy(cfg, state, tmp):
         worker(host, "prepare", role)
         with bundle.open("rb") as src:
             transfer_bundle(host, rev, src)
-        worker(host, "release", rev, pip_proxy=cfg.get("pip_proxy"))
+        worker(host, "release", rev,
+               pip_proxy=cfg.get("pip_proxy"), pip_index_url=cfg.get("pip_index_url"))
     policy = {"teachers": {"local": {"rooms": {cfg["room"]: cfg["rights"]}}}, "nodes": {}}
     seats = [dict(seatId=f"desk-{i}", row=1, column=i, nodeId=s["node"])
              for i, s in enumerate(cfg["students"], 1)]
