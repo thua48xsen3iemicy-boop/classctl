@@ -33,13 +33,34 @@ def stamp():
     return datetime.now(timezone.utc).isoformat()
 
 
+def gecos_name(value):
+    name = value.split(",", 1)[0].strip()
+    return name if 0 < len(name) <= 255 else None
+
+
 def display_name(uid):
     try:
         # getpwuid uses NSS, including SSSD on FreeIPA clients.
-        name = pwd.getpwuid(uid).pw_gecos.split(",", 1)[0].strip()
+        name = gecos_name(pwd.getpwuid(uid).pw_gecos)
     except (KeyError, OSError):
+        name = None
+    if name:
+        return name
+
+    # Query SSSD directly if the default NSS lookup has no usable GECOS.
+    try:
+        entry = subprocess.check_output(
+            ["getent", "-s", "sss", "passwd", str(uid)],
+            text=True,
+            timeout=3,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError):
         return None
-    return name if 0 < len(name) <= 255 else None
+    fields = entry.rstrip("\n").split(":")
+    if len(fields) == 7 and fields[2] == str(uid):
+        return gecos_name(fields[4])
+    return None
 
 
 def outputs(fake):
@@ -186,6 +207,7 @@ class Source:
         self.rev = 0
         self.monitors = []
         self.channels = {}
+        self.describe_requested = asyncio.Event()
         self.control_features = []
         if not args.synthetic:
             try:
@@ -355,6 +377,28 @@ class Source:
                     )
             await asyncio.sleep(0.12)
 
+    async def describe(self):
+        while True:
+            await self.describe_requested.wait()
+            self.describe_requested.clear()
+            name = await asyncio.to_thread(display_name, os.getuid())
+            await self.send_identity(name)
+            while name is None:
+                await asyncio.sleep(5)
+                name = await asyncio.to_thread(display_name, os.getuid())
+                if name is not None:
+                    await self.send_identity(name)
+
+    async def send_identity(self, name):
+        await self.ws.send_json(
+            dict(
+                op="identity",
+                sessionId=self.session,
+                hostname=socket.gethostname(),
+                displayName=name,
+            )
+        )
+
     async def listen(self):
         async for msg in self.ws:
             if msg.type != WSMsgType.TEXT:
@@ -363,14 +407,7 @@ class Source:
             key, op = data["key"], data["op"]
             c = self.channels.get(key)
             if op == "describe":
-                await self.ws.send_json(
-                    dict(
-                        op="identity",
-                        sessionId=self.session,
-                        hostname=socket.gethostname(),
-                        displayName=await asyncio.to_thread(display_name, os.getuid()),
-                    )
-                )
+                self.describe_requested.set()
             elif op == "ticket":
                 await self.ws.send_json(dict(key=key, op="redeem"))
             elif op == "open" and c is None:
@@ -432,7 +469,9 @@ async def run(args):
     async with ClientSession(connector=UnixConnector(path=args.socket)) as client:
         async with client.ws_connect("http://localhost/session") as ws:
             s = Source(args, ws)
-            tasks = [asyncio.create_task(fn()) for fn in (s.update, s.frames, s.listen)]
+            tasks = [
+                asyncio.create_task(fn()) for fn in (s.update, s.frames, s.listen, s.describe)
+            ]
             try:
                 done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
