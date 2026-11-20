@@ -12,6 +12,7 @@ import re
 import shlex
 import subprocess
 import tempfile
+from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -34,9 +35,12 @@ def privilege(host):
     return () if remote(host, "id", "-u").strip() == b"0" else ("sudo", "-n")
 
 
-def worker(host, *args):
-    return remote(host, *privilege(host), "bash", "-s", "--", *args,
-                  data=(HERE / "host.sh").read_bytes())
+def worker(host, *args, pip_proxy=None):
+    script = (HERE / "host.sh").read_bytes()
+    if pip_proxy is not None:
+        # Send the proxy through SSH stdin so credentials stay out of command arguments.
+        script = f"classctl_pip_proxy={shlex.quote(pip_proxy)}\n".encode() + script
+    return remote(host, *privilege(host), "bash", "-s", "--", *args, data=script)
 
 
 def upload(host, path, data, mode="0644"):
@@ -55,7 +59,23 @@ def token(value, pattern):
         raise ValueError(f"Invalid inventory value: {value!r}")
 
 
+def validate_pip_proxy(proxy):
+    if proxy is None:
+        return
+    message = "pip_proxy must be an HTTP or HTTPS proxy URL, or null"
+    if not isinstance(proxy, str) or any(c.isspace() or not c.isprintable() for c in proxy):
+        raise ValueError(message)
+    try:
+        url = urlsplit(proxy)
+        valid = url.scheme in ("http", "https") and url.hostname and url.port != 0
+    except ValueError:
+        raise ValueError(message) from None
+    if not valid:
+        raise ValueError(message)
+
+
 def validate(cfg):
+    validate_pip_proxy(cfg.get("pip_proxy"))
     name = r"[A-Za-z0-9][A-Za-z0-9._-]*"
     target = rf"(?:{name}@)?{name}"
     token(cfg["coordinator"], target)
@@ -144,7 +164,7 @@ def deploy(cfg, state, tmp):
         worker(host, "prepare", role)
         with bundle.open("rb") as src:
             transfer_bundle(host, rev, src)
-        worker(host, "release", rev)
+        worker(host, "release", rev, pip_proxy=cfg.get("pip_proxy"))
     policy = {"teachers": {"local": {"rooms": {cfg["room"]: cfg["rights"]}}}, "nodes": {}}
     seats = [dict(seatId=f"desk-{i}", row=1, column=i, nodeId=s["node"])
              for i, s in enumerate(cfg["students"], 1)]

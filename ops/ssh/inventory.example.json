@@ -3,6 +3,7 @@
   "dns": "classctl.school.lan",
   "port": 8767,
   "coordinator": "root@teacher-01",
+  "pip_proxy": null,
   "students": [
     {
       "ssh": "root@pc-01",
