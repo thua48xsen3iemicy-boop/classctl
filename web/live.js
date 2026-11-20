@@ -66,11 +66,13 @@ function closeFocus() {
   current.peer.close();
   el("focus").querySelector("video")?.remove();
   el("focus").hidden = true;
-  el("grid").hidden = false;
+  el("overview").hidden = false;
+  return current.scroll;
 }
 function back() {
-  closeFocus();
+  const scroll = closeFocus();
   if (state) renderGrid();
+  if (scroll) viewport.scrollTo(...scroll);
 }
 el("back").onclick = back;
 function setDrawer(open) {
@@ -126,12 +128,15 @@ async function openView(seat, id) {
   const control = state.controlNodes?.includes(seat.nodeId) ?? false;
   const ws = socket(control),
     peer = new RTCPeerConnection({ iceServers: state.iceServers });
-  const active = { ws, peer, seat, signature: signature(seat) };
+  const active = {
+    ws, peer, seat, signature: signature(seat),
+    scroll: [viewport.scrollLeft, viewport.scrollTop],
+  };
   toggleDrawer(false);
   document.querySelector(".picker").hidden = true;
   focus = active;
+  el("overview").hidden = true;
   clearGrid();
-  el("grid").hidden = true;
   el("focus").hidden = false;
   // The browser requires user activation here, before any network await.
   el("focus")
@@ -200,7 +205,7 @@ async function openView(seat, id) {
     }
   };
 }
-function preview(seat, binding, m, outputs, onDisconnect) {
+function preview(seat, binding, m, identity, outputs, onDisconnect) {
   const request = {
     version: 1,
     kind: "preview.subscribe",
@@ -215,22 +220,20 @@ function preview(seat, binding, m, outputs, onDisconnect) {
     label = document.createElement("span");
   canvas.width = 1;
   canvas.height = 1;
-  const caption = document.createElement("span");
-  caption.className = "caption";
-  const identity = state.labels?.[seat.nodeId];
-  caption.textContent = [identity?.hostname ?? seat.nodeId, identity?.user]
-    .filter(Boolean)
-    .join(" · ");
+  const connector = document.createElement("span");
+  connector.className = "connector";
+  connector.textContent = m.monitorId;
   label.className = "signal";
   function signal(text) {
     label.textContent = text;
     label.dataset.quiet = String(text === "в эфире" || text === "статично");
-    panel.setAttribute("aria-description", caption.textContent + " · " + text);
-    panel.title = caption.textContent + " · " + m.monitorId + " · " + text;
+    panel.setAttribute("aria-description", identity + " · " + text);
+    panel.title = identity + " · " + m.monitorId + " · " + text;
   }
   signal("ожидание");
-  panel.append(canvas, caption, label);
+  panel.append(canvas, connector, label);
   panel.className = "monitor";
+  panel.type = "button";
   panel.setAttribute("aria-label", seat.seatId + " · " + m.monitorId);
   panel.onclick = () => openView(seat, m.monitorId);
   outputs.append(panel);
@@ -305,86 +308,101 @@ document.addEventListener("keydown", (event) => {
 });
 
 function renderGrid() {
-    const key = "classctl.hiddenNodes." + state.room.roomId;
-    if (key !== storageKey) {
-      storageKey = key;
-      hidden = new Set();
-      try {
-        const saved = JSON.parse(localStorage.getItem(key));
-        if (Array.isArray(saved)) hidden = new Set(saved);
-      } catch {}
-    }
-  const computers = state.room.seats.filter(seat => seat.nodeId);
-  const visible = computers.filter(seat => !hidden.has(seat.nodeId));
+  const key = "classctl.hiddenNodes." + state.room.roomId;
+  if (key !== storageKey) {
+    storageKey = key;
+    hidden = new Set();
+    try {
+      const saved = JSON.parse(localStorage.getItem(key));
+      if (Array.isArray(saved)) hidden = new Set(saved);
+    } catch {}
+  }
+  const ordered = [...state.room.seats].sort(
+    (a, b) => a.row - b.row || a.column - b.column,
+  );
+  const computers = ordered.filter((seat) => seat.nodeId);
+  const visible = computers.filter((seat) => !hidden.has(seat.nodeId));
   updateChoices(computers, visible);
-  const seats = state.room.seats.filter(seat => !hidden.has(seat.nodeId));
+  const seats = ordered.filter((seat) => !hidden.has(seat.nodeId));
   document.querySelector(".picker").hidden = !computers.length;
   const emptyMessage = "Все компьютеры скрыты. Выберите нужные в панели «Компьютеры».";
   if (computers.length && !visible.length) el("notice").textContent = emptyMessage;
   else if (el("notice").textContent === emptyMessage) el("notice").textContent = "";
   const grid = el("grid");
-  const rows = [...new Set(seats.map((s) => s.row))].sort((a, b) => a - b);
-  const cols = [...new Set(seats.map((s) => s.column))].sort((a, b) => a - b);
-  grid.style.gridTemplateColumns = "repeat(" + cols.length + ", minmax(0,1fr))";
-  grid.style.gridTemplateRows = "repeat(" + rows.length + ", minmax(0,1fr))";
-  for (const seat of seats) {
-    const binding = state.nodes[seat.nodeId];
-    const sig = JSON.stringify([signature(seat), state.labels?.[seat.nodeId]]);
-    const old = cards.get(seat.seatId);
-    if (old) {
-      old.card.style.gridRow = rows.indexOf(seat.row) + 1;
-      old.card.style.gridColumn = cols.indexOf(seat.column) + 1;
-      if (old.signature === sig) continue;
-    }
-    old?.stop();
-    const card = document.createElement("article"),
-      heading = document.createElement("h2");
-    card.style.gridRow = rows.indexOf(seat.row) + 1;
-    card.style.gridColumn = cols.indexOf(seat.column) + 1;
-    heading.textContent = seat.seatId + " · " + (seat.nodeId ?? "нет ПК");
-    if (!binding?.session) {
-      heading.textContent =
-        state.labels?.[seat.nodeId]?.hostname ?? seat.nodeId ?? seat.seatId;
-      card.append(heading);
-    }
-    const outputs = document.createElement("div");
-    outputs.className = "outputs";
-    card.append(outputs);
-    const stops = [];
-    const entry = {
-      card,
-      signature: sig,
-      stop() {
-        stops.forEach((fn) => fn());
-        card.remove();
-      },
-    };
-    cards.set(seat.seatId, entry);
-    for (const m of binding?.session?.monitors ?? []) {
-      stops.push(
-        preview(seat, binding, m, outputs, () => {
-          entry.signature = null;
-        }),
-      );
-    }
-    if (!stops.length) {
-      const p = document.createElement("p");
-      p.className = "empty";
-      p.textContent = !seat.nodeId
-        ? "Место свободно"
-        : binding?.availability === "online"
-          ? "Нет графической сессии"
-          : "ПК вне сети";
-      outputs.append(p);
-    }
-    grid.append(card);
-  }
+  grid.style.setProperty("--columns", Math.max(1, Math.ceil(Math.sqrt(seats.length))));
+  grid.toggleAttribute("data-spacious", seats.length <= 9);
+  grid.toggleAttribute("data-one-seat", seats.length === 1);
   const ids = new Set(seats.map((s) => s.seatId));
-  for (const [id, card] of cards)
+  for (const [id, entry] of cards)
     if (!ids.has(id)) {
-      card.stop();
+      entry.stop();
       cards.delete(id);
     }
+  let previous = null;
+  for (const seat of seats) {
+    const label = state.labels?.[seat.nodeId];
+    const sig = JSON.stringify([signature(seat), label]);
+    let entry = cards.get(seat.seatId);
+    if (entry?.signature !== sig) {
+      entry?.stop();
+      entry = createCard(seat, state.nodes[seat.nodeId], label, sig);
+      cards.set(seat.seatId, entry);
+    }
+    const next = previous ? previous.nextElementSibling : grid.firstElementChild;
+    if (entry.card !== next) grid.insertBefore(entry.card, next);
+    previous = entry.card;
+  }
+}
+function createCard(seat, binding, label, sig) {
+  const card = document.createElement("article"),
+    heading = document.createElement("header"),
+    caption = document.createElement("h2"),
+    position = document.createElement("span"),
+    outputs = document.createElement("div");
+  const identity = [label?.hostname ?? seat.nodeId ?? seat.seatId, label?.user]
+    .filter(Boolean)
+    .join(" · ");
+  card.className = "seat";
+  heading.className = "seat-heading";
+  caption.className = "caption";
+  caption.textContent = caption.title = identity;
+  heading.append(caption);
+  if (seat.nodeId) {
+    position.className = "seat-id";
+    position.textContent = position.title = seat.seatId;
+    heading.append(position);
+  }
+  outputs.className = "outputs";
+  card.append(heading, outputs);
+  const stops = [];
+  const entry = {
+    card,
+    signature: sig,
+    stop() {
+      stops.forEach((fn) => fn());
+      card.remove();
+    },
+  };
+  const monitors = binding?.session?.monitors ?? [];
+  outputs.style.setProperty("--outputs", monitors.length || 1);
+  for (const monitor of monitors) {
+    stops.push(
+      preview(seat, binding, monitor, identity, outputs, () => {
+        entry.signature = null;
+      }),
+    );
+  }
+  if (!monitors.length) {
+    const p = document.createElement("p");
+    p.className = "empty";
+    p.textContent = !seat.nodeId
+      ? "Место свободно"
+      : binding?.availability === "online"
+        ? "Нет графической сессии"
+        : "ПК вне сети";
+    outputs.append(p);
+  }
+  return entry;
 }
 function updateChoices(seats, visible) {
   const next = JSON.stringify([storageKey, seats, state.labels]);
@@ -415,18 +433,19 @@ async function poll() {
     const initial = !state;
     state = await response.json();
     document.title = state.room.roomId + " · classctl";
+    el("room-name").textContent = state.room.roomId;
     if (initial) el("notice").textContent = "";
     if (focus) {
       const seat = state.room.seats.find((s) => s.seatId === focus.seat.seatId);
-      if (!seat || signature(seat) !== focus.signature) closeFocus();
-    }
-    if (!focus) renderGrid();
+      if (!seat || signature(seat) !== focus.signature) back();
+    } else renderGrid();
   } catch {
     state = null;
     toggleDrawer(false);
     document.querySelector(".picker").hidden = true;
     closeFocus();
     clearGrid();
+    el("room-name").textContent = "";
     el("notice").textContent = "Аудитория недоступна";
   }
   setTimeout(poll, 600);

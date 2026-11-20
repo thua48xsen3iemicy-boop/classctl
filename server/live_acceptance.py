@@ -129,7 +129,8 @@ def check_dense_grid(context, origin, status):
 
         def dimensions():
             return caption.evaluate(
-                """el=>[el.closest('button').offsetWidth,el.offsetHeight,getComputedStyle(el).fontSize]"""
+                """el => [el.closest('.seat').querySelector('.monitor').offsetWidth,
+                          el.offsetHeight, getComputedStyle(el).fontSize]"""
             )
 
         before = dimensions()
@@ -206,6 +207,75 @@ def check_dense_grid(context, origin, status):
         print(
             "Layout fixture: 25 seats, 50 monitor cards, no scrolling; correct target and full-page video"
         )
+    finally:
+        page.close()
+
+
+def check_overview_grid(context, origin, status):
+    page = context.new_page()
+    page.set_viewport_size({"width": 1366, "height": 768})
+    seats = []
+    nodes = {}
+    for i, count in enumerate([2, 1, 2, 1, 2, 0], 1):
+        node_id = f"pc-{i:02}"
+        seats.append(dict(seatId=f"desk-{i}", nodeId=node_id, row=1, column=i))
+        session = {**status["session"], "monitors": status["session"]["monitors"][:count]}
+        nodes[node_id] = {**status, "nodeId": node_id, "session": session if count else None}
+    state = dict(room=dict(roomId="lab", seats=seats[::-1]), nodes=nodes, iceServers=[])
+    page.route("**/state", lambda route: route.fulfill(json=state))
+    page.route_web_socket("**/stream", lambda ws: ws.on_message(lambda _: None))
+    page.add_init_script("""
+        window.previewSockets = [];
+        window.WebSocket = class extends WebSocket {
+            send(message) {
+                const {request} = JSON.parse(message);
+                if (request?.kind === 'preview.subscribe') {
+                    previewSockets.push({nodeId: request.nodeId, ws: this});
+                }
+                super.send(message);
+            }
+        };
+    """)
+    try:
+        page.goto(origin)
+        page.get_by_text("Нет графической сессии").wait_for()
+        cards = page.locator(".seat")
+        assert cards.locator(".seat-id").all_text_contents() == [s["seatId"] for s in seats]
+        assert cards.evaluate_all("cards=>cards.map(c=>c.querySelectorAll('.monitor').length)") == [2, 1, 2, 1, 2, 0]
+        boxes = [card.bounding_box() for card in cards.all()]
+        assert boxes[0]["y"] == boxes[1]["y"] == boxes[2]["y"]
+        assert boxes[3]["y"] == boxes[4]["y"] == boxes[5]["y"] > boxes[0]["y"]
+        assert boxes[0]["x"] == boxes[3]["x"] < boxes[1]["x"] < boxes[2]["x"]
+        assert all(b["width"] > b["height"] for b in boxes)
+        dual = cards.first.locator(".monitor").all()
+        left, right = [m.bounding_box() for m in dual]
+        assert left["y"] == right["y"] and left["x"] + left["width"] < right["x"]
+        assert cards.nth(1).locator(".monitor").bounding_box()["width"] > left["width"]
+
+        page.set_viewport_size(dict(width=390, height=844))
+        narrow = [card.bounding_box() for card in cards.all()]
+        assert all(b["x"] == narrow[0]["x"] and b["x"] + b["width"] <= 390 for b in narrow)
+        assert all(a["y"] + a["height"] < b["y"] for a, b in zip(narrow, narrow[1:]))
+        page.set_viewport_size(dict(width=1366, height=768))
+
+        page.get_by_role("button", name="Компьютеры").click()
+        first = page.get_by_role("checkbox", name="desk-1 · pc-01")
+        page.wait_for_function("previewSockets.length === 8")
+        first.uncheck()
+        assert cards.count() == 5
+        assert cards.first.locator(".seat-id").inner_text() == "desk-2"
+        assert page.evaluate("""previewSockets.every(({nodeId, ws}) =>
+            nodeId === 'pc-01' ? ws.readyState >= WebSocket.CLOSING : ws.readyState === WebSocket.OPEN)""")
+        page.reload()
+        page.get_by_text("Нет графической сессии").wait_for()
+        assert cards.count() == 5
+        page.get_by_role("button", name="Компьютеры").click()
+        first.check()
+        assert cards.first.locator(".seat-id").inner_text() == "desk-1"
+        assert cards.count() == 6
+        page.keyboard.press("Escape")
+        assert page.locator("#choices-panel").is_hidden()
+        print("Layout fixture: six seats in a 3×2 grid, mixed outputs, narrow window and persisted filter OK")
     finally:
         page.close()
 
@@ -369,11 +439,9 @@ def run(tmp, stack, x11, listeners_only):
         "text=>[...document.querySelectorAll('.caption')].some(el=>el.textContent===text)",
         arg=socket.gethostname() + " · " + expected_user,
     )
-    check_dense_grid(
-        ctx,
-        origin,
-        page.evaluate("async()=>(await (await fetch('/state')).json()).nodes['pc-01']"),
-    )
+    status = page.evaluate("async()=>(await (await fetch('/state')).json()).nodes['pc-01']")
+    check_overview_grid(ctx, origin, status)
+    check_dense_grid(ctx, origin, status)
     first, second = monitors
     for monitor in (first, second):
         label = "desk-1 · " + monitor["monitorId"]
