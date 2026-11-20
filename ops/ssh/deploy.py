@@ -160,13 +160,32 @@ def identity(host, role, label, state, dns):
     return hashlib.sha256(run("openssl", "x509", "-in", cache, "-outform", "DER")).hexdigest()
 
 
-def deploy(cfg, state, tmp):
+def existing_node_policy(server, state, unchanged):
+    remote_ca = remote(server, *privilege(server), "cat", "/etc/classctl/server/ca.pem")
+    local_ca = state / "ca.pem"
+    if not local_ca.is_file() or local_ca.read_bytes() != remote_ca:
+        raise ValueError("Selective deployment requires the existing classroom CA. Check --state.")
+
+    current = json.loads(remote(server, *privilege(server), "cat", "/etc/classctl/policy.json"))
+    nodes = {fp: node for fp, node in current["nodes"].items() if node in unchanged}
+    missing = unchanged.difference(nodes.values())
+    if missing:
+        raise ValueError("Include unprovisioned nodes in the deployment: " + ", ".join(sorted(missing)))
+    return nodes
+
+
+def deploy(cfg, state, tmp, only_nodes):
     server, dns, port = cfg["coordinator"], cfg["dns"], cfg["port"]
+    students = [s for s in cfg["students"] if not only_nodes or s["node"] in only_nodes]
+    policy = {"teachers": {"local": {"rooms": {cfg["room"]: cfg["rights"]}}}, "nodes": {}}
+    if only_nodes:
+        unchanged = {s["node"] for s in cfg["students"]} - only_nodes
+        policy["nodes"] = existing_node_policy(server, state, unchanged)
     rev = run("git", "-C", ROOT, "rev-parse", "HEAD").decode().strip()
     bundle = tmp / "project.bundle"
     run("git", "-C", ROOT, "bundle", "create", bundle, "HEAD")
     ca(state)
-    roles = {s["ssh"]: "student" for s in cfg["students"]}
+    roles = {s["ssh"]: "student" for s in students}
     roles[server] = "server"
     for host, role in roles.items():
         print("Preparing", host, flush=True)
@@ -175,12 +194,11 @@ def deploy(cfg, state, tmp):
             transfer_bundle(host, rev, src)
         worker(host, "release", rev,
                pip_proxy=cfg.get("pip_proxy"), pip_index_url=cfg.get("pip_index_url"))
-    policy = {"teachers": {"local": {"rooms": {cfg["room"]: cfg["rights"]}}}, "nodes": {}}
     seats = [dict(seatId=f"desk-{i}", row=1, column=i, nodeId=s["node"])
              for i, s in enumerate(cfg["students"], 1)]
     room = dict(version=1, kind="room", roomId=cfg["room"], seats=seats)
     identity(server, "server", "server", state, dns)
-    for s in cfg["students"]:
+    for s in students:
         host, node = s["ssh"], s["node"]
         fp = identity(host, "node", "node", state, dns)
         if fp in policy["nodes"]:
@@ -191,10 +209,10 @@ def deploy(cfg, state, tmp):
     upload(server, "/etc/classctl/policy.json", json.dumps(policy).encode())
     worker(server, "server", rev, port, cfg["ui_port"])
     url = f"https://{dns}:{port}"
-    for s in cfg["students"]:
+    for s in students:
         worker(s["ssh"], "student", rev, s["node"], url)
     ui = f"http://127.0.0.1:{cfg['ui_port']}"
-    worker(server, "check", ui, *(s["node"] for s in cfg["students"]))
+    worker(server, "check", ui, *(s["node"] for s in students))
     print(f"Teacher portal on {server}: {ui}/")
 
 
@@ -208,9 +226,15 @@ def main():
     parser.add_argument("inventory", type=Path)
     parser.add_argument("--state", type=Path, default=Path.home() / ".local/state/classctl")
     parser.add_argument("--check", action="store_true", help="validate inventory offline")
+    parser.add_argument("--only-node", action="append", default=[], metavar="ID",
+                        help="deploy to the coordinator and this student node (repeatable)")
     args = parser.parse_args()
     cfg = json.loads(args.inventory.read_text())
     validate(cfg)
+    only_nodes = set(args.only_node)
+    unknown = only_nodes.difference(s["node"] for s in cfg["students"])
+    if unknown:
+        parser.error("unknown node IDs: " + ", ".join(sorted(unknown)))
     if args.check:
         print("Inventory OK")
         return
@@ -218,7 +242,10 @@ def main():
     args.state.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (args.state / "lock").open("a") as lock, tempfile.TemporaryDirectory() as temp:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        deploy(cfg, args.state, Path(temp))
+        try:
+            deploy(cfg, args.state, Path(temp), only_nodes)
+        except ValueError as error:
+            parser.exit(1, f"{error}\n")
 
 
 if __name__ == "__main__":
