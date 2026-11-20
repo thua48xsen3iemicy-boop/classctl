@@ -22,6 +22,7 @@ from aiortc import (
     RTCSessionDescription,
     VideoStreamTrack,
 )
+from aiortc.codecs import vpx
 from aiortc.mediastreams import MediaStreamError
 from av import VideoFrame
 from remote_input import Controller
@@ -441,6 +442,12 @@ if __name__ == "__main__":
     p.add_argument("--node", required=True)
     p.add_argument("--synthetic", action="store_true")
     args = p.parse_args()
+
+    # aiortc 1.14.0 has no public bitrate setting for its VP8 sender.
+    # Apply the LAN bitrate range to the screen capture process only.
+    vpx.DEFAULT_BITRATE = 4_000_000
+    vpx.MIN_BITRATE = 2_000_000
+    vpx.MAX_BITRATE = 8_000_000
 
     async def reconnect():
         while True:
