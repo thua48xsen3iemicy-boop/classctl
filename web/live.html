@@ -8,19 +8,20 @@
   </head>
   <body>
     <div id="overview">
-      <header class="toolbar">
-        <div class="room">
-          <h1>Аудитория</h1>
-          <span id="room-name"></span>
-        </div>
-        <aside class="picker" aria-label="Выбор компьютеров" hidden>
-          <button id="tab" type="button" aria-expanded="false" aria-controls="choices-panel">Компьютеры</button>
+      <aside id="sidebar" aria-label="Панель аудитории">
+        <button id="sidebar-handle" type="button" aria-label="Меню аудитории" aria-controls="sidebar-panel" aria-expanded="false">›</button>
+        <div id="sidebar-panel" inert>
+          <div class="room">
+            <h1>Аудитория <span id="room-name"></span></h1>
+            <button id="sidebar-pin" type="button" aria-pressed="false" aria-label="Закрепить панель">Закрепить</button>
+          </div>
+          <button id="tab" type="button" aria-expanded="false" aria-controls="choices-panel" hidden>Компьютеры</button>
           <section id="choices-panel" hidden>
             <p id="count"></p>
             <div id="choices"></div>
           </section>
-        </aside>
-      </header>
+        </div>
+      </aside>
       <div id="viewport"><main id="grid" aria-label="Рабочие места"></main></div>
     </div>
     <section id="focus" hidden>

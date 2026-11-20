@@ -138,15 +138,17 @@ def check_dense_grid(context, origin, status):
         page.mouse.move(200, 200)
         page.mouse.wheel(0, -120)
         page.keyboard.up("Control")
-        page.wait_for_function("document.querySelector('#grid').offsetWidth>innerWidth")
+        page.wait_for_function(
+            "document.querySelector('#grid').offsetWidth > document.querySelector('#viewport').clientWidth"
+        )
         after = dimensions()
         assert after[0] > before[0] and after[1:] == before[1:]
         page.keyboard.press("Control+0")
         page.wait_for_function(
-            "document.querySelector('#grid').offsetWidth===innerWidth"
+            "document.querySelector('#grid').offsetWidth === document.querySelector('#viewport').clientWidth"
         )
         monitor = status["session"]["monitors"][1]["monitorId"]
-        page.get_by_role("button", name=f"desk-25 · {monitor}", exact=True).click()
+        page.get_by_role("button", name="desk-25 · Экран 2", exact=True).click()
         for _ in range(100):
             if any(m.get("request", {}).get("kind") == "access" for m in requests):
                 break
@@ -247,7 +249,15 @@ def check_overview_grid(context, origin, status):
         assert boxes[3]["y"] == boxes[4]["y"] == boxes[5]["y"] > boxes[0]["y"]
         assert boxes[0]["x"] == boxes[3]["x"] < boxes[1]["x"] < boxes[2]["x"]
         assert all(b["width"] > b["height"] for b in boxes)
+        assert boxes[1]["x"] - boxes[0]["x"] - boxes[0]["width"] == 6
+        assert boxes[3]["y"] - boxes[0]["y"] - boxes[0]["height"] == 6
+        assert cards.first.evaluate("card => getComputedStyle(card).borderWidth") == "0px"
         dual = cards.first.locator(".monitor").all()
+        assert [m.get_attribute("aria-label") for m in dual] == [
+            "desk-1 · Экран 1",
+            "desk-1 · Экран 2",
+        ]
+        assert not cards.locator(".connector").count()
         left, right = [m.bounding_box() for m in dual]
         assert left["y"] == right["y"] and left["x"] + left["width"] < right["x"]
         assert cards.nth(1).locator(".monitor").bounding_box()["width"] > left["width"]
@@ -257,6 +267,21 @@ def check_overview_grid(context, origin, status):
         assert all(b["x"] == narrow[0]["x"] and b["x"] + b["width"] <= 390 for b in narrow)
         assert all(a["y"] + a["height"] < b["y"] for a, b in zip(narrow, narrow[1:]))
         page.set_viewport_size(dict(width=1366, height=768))
+
+        handle = page.get_by_role("button", name="Меню аудитории")
+        pin = page.get_by_role("button", name="Закрепить панель")
+        viewport = page.locator("#viewport")
+        grid_width = viewport.bounding_box()["width"]
+        handle.hover()
+        page.get_by_role("heading", name="Аудитория lab").wait_for()
+        assert viewport.bounding_box()["width"] == grid_width
+        page.mouse.move(1000, 700)
+        page.wait_for_function("document.getElementById('sidebar-panel').inert")
+        handle.focus()
+        page.keyboard.press("Enter")
+        pin.click()
+        assert pin.get_attribute("aria-pressed") == "true"
+        assert viewport.bounding_box()["width"] < grid_width
 
         page.get_by_role("button", name="Компьютеры").click()
         first = page.get_by_role("checkbox", name="desk-1 · pc-01")
@@ -269,13 +294,18 @@ def check_overview_grid(context, origin, status):
         page.reload()
         page.get_by_text("Нет графической сессии").wait_for()
         assert cards.count() == 5
+        assert pin.get_attribute("aria-pressed") == "true"
         page.get_by_role("button", name="Компьютеры").click()
         first.check()
         assert cards.first.locator(".seat-id").inner_text() == "desk-1"
         assert cards.count() == 6
         page.keyboard.press("Escape")
         assert page.locator("#choices-panel").is_hidden()
-        print("Layout fixture: six seats in a 3×2 grid, mixed outputs, narrow window and persisted filter OK")
+        pin.click()
+        assert viewport.bounding_box()["width"] == grid_width
+        page.mouse.move(1000, 700)
+        page.wait_for_function("document.getElementById('sidebar-panel').inert")
+        print("Layout fixture: compact grid, mixed outputs, narrow window, sidebar and persisted filter OK")
     finally:
         page.close()
 
@@ -443,10 +473,10 @@ def run(tmp, stack, x11, listeners_only):
     check_overview_grid(ctx, origin, status)
     check_dense_grid(ctx, origin, status)
     first, second = monitors
-    for monitor in (first, second):
+    for index, monitor in enumerate((first, second), 1):
         label = "desk-1 · " + monitor["monitorId"]
         w, h = monitor["width"], monitor["height"]
-        page.get_by_role("button", name=label).click()
+        page.get_by_role("button", name=f"desk-1 · Экран {index}").click()
         page.wait_for_function(
             "([w,h])=>{const v=document.querySelector('video');return v&&v.readyState>=2&&v.videoWidth===w&&v.videoHeight===h}",
             arg=[w, h],
@@ -480,7 +510,7 @@ def run(tmp, stack, x11, listeners_only):
             subprocess.run(["xrandr", *args], check=True)
 
         try:
-            page.get_by_role("button", name="desk-1 · DUMMY1").click()
+            page.get_by_role("button", name="desk-1 · Экран 2").click()
             page.wait_for_function("document.querySelector('video')?.readyState>=2")
             page.wait_for_function(
                 "document.querySelector('#mode').textContent==='Управление включено'"
@@ -527,7 +557,7 @@ def run(tmp, stack, x11, listeners_only):
     )
     login()
     page.wait_for_function(grid)
-    page.get_by_role("button", name="desk-1 · " + first["monitorId"]).click()
+    page.get_by_role("button", name="desk-1 · Экран 1").click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
     policy = json.loads((tmp / "policy").read_text())
     policy["teachers"].clear()

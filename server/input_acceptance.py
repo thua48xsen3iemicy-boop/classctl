@@ -26,7 +26,8 @@ def exercise(page, tmp, monitor):
     policy = tmp / "policy"
     config = json.loads(policy.read_text())
     rooms = config["teachers"]["local"]["rooms"]
-    page.get_by_role("button", name="desk-1 · DUMMY1").click()
+    second_screen = page.get_by_role("button", name="desk-1 · Экран 2")
+    second_screen.click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
     assert not page.get_by_text("Включить управление").count()
     page.evaluate(
@@ -37,7 +38,7 @@ def exercise(page, tmp, monitor):
     rooms["lab-a"].append("control")
     policy.write_text(json.dumps(config))
     page.wait_for_timeout(800)
-    page.get_by_role("button", name="desk-1 · DUMMY1").click()
+    second_screen.click()
     page.wait_for_function(
         "document.querySelector('#mode').textContent==='Управление включено'"
     )
@@ -105,7 +106,7 @@ def exercise(page, tmp, monitor):
     page.keyboard.up("Shift")
     page.mouse.up()
     page.reload()
-    page.get_by_role("button", name="desk-1 · DUMMY1").wait_for()
+    second_screen.wait_for()
     d.close()
     print(
         "T07: explicit control, physical pointer, Shift/button release on lost browser heartbeat OK"
