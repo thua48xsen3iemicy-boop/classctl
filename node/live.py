@@ -1,4 +1,4 @@
-"""Forward one operator-selected local session over the node's outgoing mTLS connection."""
+"""Forward the active local X11 session over the node's outgoing mTLS connection."""
 
 import argparse
 import asyncio
@@ -19,7 +19,9 @@ async def forward(msg, dst):
         await dst.send_bytes(msg.data)
 
 
-def active_seat(pid):
+def active_seat(pid, uid):
+    if uid <= 0:
+        return None
     # Resolve the kernel-reported peer PID through logind/elogind.
     base = ["busctl", "--system"]
     try:
@@ -52,14 +54,18 @@ def active_seat(pid):
                 timeout=1,
             ).strip()
 
-        return (
-            prop("Active") == "b true"
+        if (
+            prop("User").startswith(f'(uo) {uid} "')
+            and prop("Class") == 's "user"'
+            and prop("Active") == "b true"
             and prop("Remote") == "b false"
             and prop("Type") == 's "x11"'
             and prop("Seat").startswith('(so) "seat0" ')
-        )
+        ):
+            return path
     except (OSError, subprocess.SubprocessError, IndexError):
-        return False
+        pass
+    return None
 
 
 async def main(args):
@@ -72,7 +78,8 @@ async def main(args):
     tls.load_cert_chain(args.cert, args.key)
     upstream = None
     local = None
-    local_pid = None
+    local_peer = None
+    checking_session = asyncio.Lock()
 
     async def idle(ws):
         await ws.send_json(
@@ -87,19 +94,25 @@ async def main(args):
         )
 
     async def session(request):
-        nonlocal local, local_pid
+        nonlocal local, local_peer
         sock = request.transport.get_extra_info("socket")
         pid, uid, _ = struct.unpack(
             "3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
         )
-        if uid != args.uid or not (
-            args.test_session or await asyncio.to_thread(active_seat, pid)
-        ):
+        if args.uid is not None and uid != args.uid:
             raise web.HTTPForbidden()
-        if local is not None or upstream is None:
+        if local is not None or upstream is None or checking_session.locked():
             raise web.HTTPServiceUnavailable()
+        session_path = None
+        if not args.test_session:
+            async with checking_session:
+                session_path = await asyncio.to_thread(active_seat, pid, uid)
+            if session_path is None:
+                raise web.HTTPForbidden()
+            if local is not None or upstream is None:
+                raise web.HTTPServiceUnavailable()
         ws = web.WebSocketResponse()
-        local, local_pid = ws, pid
+        local, local_peer = ws, (pid, uid, session_path)
         try:
             await ws.prepare(request)
             async for msg in ws:
@@ -107,19 +120,22 @@ async def main(args):
                     break
                 await forward(msg, upstream)
         finally:
-            local, local_pid = None, None
-            if upstream and not upstream.closed:
-                await idle(upstream)
+            try:
+                if upstream and not upstream.closed:
+                    await idle(upstream)
+            finally:
+                local, local_peer = None, None
         return ws
 
     async def monitor(ws):
         while True:
             if local is None:
                 await idle(ws)
-            elif not args.test_session and not await asyncio.to_thread(
-                active_seat, local_pid
-            ):
-                await local.close()
+            elif not args.test_session:
+                current = local
+                pid, uid, session_path = local_peer
+                if await asyncio.to_thread(active_seat, pid, uid) != session_path:
+                    await current.close()
             await asyncio.sleep(0.7)
 
     async def connect():
@@ -158,8 +174,13 @@ async def main(args):
     await runner.setup()
     os.umask(0o077)
     await web.UnixSite(runner, args.socket).start()
-    os.chown(args.socket, args.uid, -1)
-    print(f"Слушаю Unix-сокет {args.socket} (UID {args.uid})", flush=True)
+    if args.uid is None:
+        # The parent directory is owned by the service. The handler authenticates
+        # local peers using kernel credentials and the corresponding login1 session.
+        os.chmod(args.socket, 0o666)
+    else:
+        os.chown(args.socket, args.uid, -1)
+    print(f"Слушаю Unix-сокет {args.socket}", flush=True)
     try:
         await connect()
     finally:
@@ -172,5 +193,5 @@ if __name__ == "__main__":
         p.add_argument("--" + name, required=True)
     p.add_argument("--node", required=True)
     p.add_argument("--test-session", action="store_true")
-    p.add_argument("--uid", type=int, required=True)
+    p.add_argument("--uid", type=int, help="Restrict to one UID (required with --test-session)")
     asyncio.run(main(p.parse_args()))

@@ -23,6 +23,8 @@ def run(*args, data=None, stdin=None):
 
 
 def remote(host, *args, **kw):
+    if "@" not in host:
+        host = "root@" + host
     return run("ssh", "-oBatchMode=yes", "-oStrictHostKeyChecking=yes", host,
                shlex.join(map(str, args)), **kw)
 
@@ -72,15 +74,15 @@ def validate(cfg):
     if not cfg["students"]:
         raise ValueError("Student nodes are required")
     nodes = set()
-    hosts = {cfg["coordinator"]}
+    hosts = {cfg["coordinator"].removeprefix("root@")}
     for s in cfg["students"]:
         token(s["node"], ident)
-        if s["node"] in nodes or s["ssh"] in hosts:
-            raise ValueError("Duplicate student node or SSH target")
-        hosts.add(s["ssh"])
-        nodes.add(s["node"])
-        token(s["user"], r"[a-z_][a-z0-9_-]*")
         token(s["ssh"], target)
+        host = s["ssh"].removeprefix("root@")
+        if s["node"] in nodes or host in hosts:
+            raise ValueError("Duplicate student node or SSH target")
+        hosts.add(host)
+        nodes.add(s["node"])
 
 
 def ca(state):
@@ -160,7 +162,7 @@ def deploy(cfg, state, tmp):
     worker(server, "server", rev, port, cfg["ui_port"])
     url = f"https://{dns}:{port}"
     for s in cfg["students"]:
-        worker(s["ssh"], "student", rev, s["user"], s["node"], url)
+        worker(s["ssh"], "student", rev, s["node"], url)
     ui = f"http://127.0.0.1:{cfg['ui_port']}"
     worker(server, "check", ui, *(s["node"] for s in cfg["students"]))
     print(f"Teacher portal on {server}: {ui}/")
