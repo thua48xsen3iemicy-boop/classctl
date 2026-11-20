@@ -1,5 +1,6 @@
 """Exercise the coordinator across two process lifetimes."""
 import json
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -8,6 +9,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+from coordinator import inventory
 
 HERE = Path(__file__).resolve().parent
 EXAMPLES = HERE.parent / "contracts/examples"
@@ -58,7 +61,35 @@ def accept():
                 raise AssertionError("Unexpected control endpoint")
         with running(db, "--seed", str(Path(tmp) / "absent")) as call:
             assert call("room") == room and call(prefix+"status") == offline
+
+        seed = Path(tmp) / "expanded.json"
+        desired = dict(room, seats=[
+            dict(seatId="desk-1", row=1, column=1, nodeId="pc-03"),
+            dict(seatId="desk-2", row=1, column=2, nodeId="pc-02"),
+            dict(seatId="desk-3", row=1, column=3, nodeId="pc-01"),
+        ])
+        seed.write_text(json.dumps(desired))
+        with sqlite3.connect(db) as conn:
+            conn.execute("CREATE TABLE audit (event TEXT)")
+            conn.execute("INSERT INTO audit VALUES ('before deployment')")
+        expanded = inventory(db, seed, extend=True)
+        assert expanded["seats"] == room["seats"] + [
+            dict(seatId="desk-3", row=1, column=3, nodeId="pc-03"),
+        ]
+        assert inventory(db, seed, extend=True) == expanded
+        seed.write_text(json.dumps(room))
+        try:
+            inventory(db, seed, extend=True)
+        except ValueError as err:
+            assert "pc-03" in str(err)
+        else:
+            raise AssertionError("Unexpected removal from the inventory")
+        with sqlite3.connect(db) as conn:
+            assert conn.execute("SELECT event FROM audit").fetchall() == [("before deployment",)]
+        with running(db) as call:
+            assert call("room") == expanded and call("nodes/pc-03/status")["availability"] == "offline"
     print("OK: two monitors, stale/online, offline, inventory after restart, control disabled")
+    print("OK: deployment appends seats, preserves audit, and accepts a repeat with the same nodes")
 
 
 if __name__ == "__main__":

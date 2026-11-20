@@ -133,13 +133,14 @@ inventory)
     release=$base/$1
     install -d -m 700 "$var/coordinator"
     "$release/.venv/bin/python" - "$release/server" "$var/coordinator/room.sqlite" "$etc/room.json" <<'PY'
-import json, sys
+import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from coordinator import inventory
-seed = Path(sys.argv[3])
-if inventory(sys.argv[2], seed) != json.loads(seed.read_text()):
-    sys.exit("Existing SQLite inventory differs. Reconcile seats before deployment.")
+try:
+    inventory(sys.argv[2], Path(sys.argv[3]), extend=True)
+except ValueError as error:
+    sys.exit(str(error))
 PY
     ;;
 server)
