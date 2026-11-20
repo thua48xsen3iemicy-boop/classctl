@@ -169,6 +169,17 @@
     {
       "type": "object",
       "properties": {
+        "kind": {"const": "wheel"},
+        "steps": {"type": "integer", "minimum": -8, "maximum": 8, "not": {"const": 0}},
+        "u": {"type": "number", "minimum": 0, "exclusiveMaximum": 1},
+        "v": {"type": "number", "minimum": 0, "exclusiveMaximum": 1}
+      },
+      "required": ["kind", "steps", "u", "v"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
         "kind": {
           "const": "release"
         }

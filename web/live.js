@@ -121,6 +121,7 @@ function signature(seat) {
     node?.session,
     node?.availability,
     state.controlNodes?.includes(seat.nodeId),
+    state.wheelNodes?.includes(seat.nodeId),
   ]);
 }
 async function openView(seat, id) {
@@ -166,7 +167,9 @@ async function openView(seat, id) {
     active.playing = true;
 
     if (control) {
-      active.cleanup = bindInput(video, ws);
+      active.cleanup = bindInput(
+        video, ws, state.wheelNodes?.includes(seat.nodeId),
+      );
       el("mode").textContent = "Управление включено";
     } else el("mode").textContent = "Режим просмотра";
   };

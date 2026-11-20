@@ -8,7 +8,7 @@ export function coordinates(rect, width, height, x, y) {
   const v = (y - rect.top - (rect.height - h) / 2) / h;
   return u >= 0 && v >= 0 && u < 1 && v < 1 ? { u, v } : null;
 }
-export function bindInput(video, ws) {
+export function bindInput(video, ws, wheelEnabled = false) {
   const abort = new AbortController();
   const options = { signal: abort.signal };
   function send(data) {
@@ -16,6 +16,15 @@ export function bindInput(video, ws) {
   }
   function release() {
     send({ kind: "release" });
+  }
+  function pointAt(e) {
+    return coordinates(
+      video.getBoundingClientRect(),
+      video.videoWidth,
+      video.videoHeight,
+      e.clientX,
+      e.clientY,
+    );
   }
   video.tabIndex = 0;
   video.style.objectFit = "contain";
@@ -36,13 +45,7 @@ export function bindInput(video, ws) {
     video.addEventListener(
       type,
       (e) => {
-        const point = coordinates(
-          video.getBoundingClientRect(),
-          video.videoWidth,
-          video.videoHeight,
-          e.clientX,
-          e.clientY,
-        );
+        const point = pointAt(e);
         if (!point) {
           if (type === "pointerup") release();
           return;
@@ -65,6 +68,33 @@ export function bindInput(video, ws) {
         });
       },
       options,
+    );
+  }
+  if (wheelEnabled) {
+    let remainder = 0;
+    video.addEventListener(
+      "wheel",
+      (e) => {
+        const point = pointAt(e);
+        if (!point) {
+          remainder = 0;
+          return;
+        }
+        const mode = e.deltaMode;
+        const delta = e.deltaY;
+        if (!delta || !Number.isFinite(delta)) return;
+        e.preventDefault();
+        const scale = {
+          [WheelEvent.DOM_DELTA_LINE]: 1 / 3,
+          [WheelEvent.DOM_DELTA_PAGE]: 3,
+        }[mode] ?? 1 / 100;
+        remainder += delta * scale;
+        const steps = Math.trunc(remainder);
+        remainder -= steps;
+        if (steps)
+          send({ kind: "wheel", steps: Math.max(-8, Math.min(steps, 8)), ...point });
+      },
+      { ...options, passive: false },
     );
   }
   video.addEventListener("contextmenu", (e) => e.preventDefault(), options);
