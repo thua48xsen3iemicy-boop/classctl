@@ -149,8 +149,6 @@ def deploy(cfg, state, tmp):
     seats = [dict(seatId=f"desk-{i}", row=1, column=i, nodeId=s["node"])
              for i, s in enumerate(cfg["students"], 1)]
     room = dict(version=1, kind="room", roomId=cfg["room"], seats=seats)
-    upload(server, "/etc/classctl/room.json", json.dumps(room).encode())
-    worker(server, "inventory", rev)
     identity(server, "server", "server", state, dns)
     for s in cfg["students"]:
         host, node = s["ssh"], s["node"]
@@ -158,6 +156,8 @@ def deploy(cfg, state, tmp):
         if fp in policy["nodes"]:
             raise ValueError("Two nodes share a certificate")
         policy["nodes"][fp] = node
+    upload(server, "/etc/classctl/room.json", json.dumps(room).encode())
+    worker(server, "inventory", rev)
     upload(server, "/etc/classctl/policy.json", json.dumps(policy).encode())
     worker(server, "server", rev, port, cfg["ui_port"])
     url = f"https://{dns}:{port}"
