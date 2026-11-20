@@ -147,13 +147,20 @@ body {
   min-width: 0;
 }
 .caption {
+  display: flex;
   margin: 0;
   padding: 0 2px 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 12px;
   font-weight: 650;
+}
+.caption > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+.caption-node {
+  flex-shrink: 0;
+  max-width: 100%;
 }
 .outputs {
   display: grid;

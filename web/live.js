@@ -413,8 +413,17 @@ function createCard(seat, binding, displayName, sig) {
   card.className = "seat";
   if (seat.nodeId) {
     const caption = document.createElement("h2");
+    const computer = document.createElement("span");
     caption.className = "caption";
-    caption.textContent = caption.title = identity;
+    caption.title = identity;
+    computer.className = "caption-node";
+    computer.textContent = seat.nodeId;
+    caption.append(computer);
+    if (displayName) {
+      const student = document.createElement("span");
+      student.textContent = " · " + displayName;
+      caption.append(student);
+    }
     card.append(caption);
   }
   outputs.className = "outputs";
