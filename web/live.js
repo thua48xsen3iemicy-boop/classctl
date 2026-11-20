@@ -147,7 +147,7 @@ async function openView(seat, id) {
     })
     .catch(() => {});
   el("notice").textContent = "";
-  el("target").textContent = seat.seatId + " · " + id;
+  el("target").textContent = seat.nodeId + " · " + id;
   el("mode").textContent = "Подключение…";
   const request = {
     version: 1,
@@ -234,7 +234,7 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
   panel.append(canvas, label);
   panel.className = "monitor";
   panel.type = "button";
-  panel.setAttribute("aria-label", seat.seatId + " · " + name);
+  panel.setAttribute("aria-label", seat.nodeId + " · " + name);
   panel.onclick = () => openView(seat, m.monitorId);
   outputs.append(panel);
   let verified = 0,
@@ -391,12 +391,12 @@ function renderGrid() {
     }
   let previous = null;
   for (const seat of seats) {
-    const label = state.labels?.[seat.nodeId];
-    const sig = JSON.stringify([signature(seat), label]);
+    const displayName = state.labels?.[seat.nodeId]?.displayName;
+    const sig = JSON.stringify([signature(seat), displayName]);
     let entry = cards.get(seat.seatId);
     if (entry?.signature !== sig) {
       entry?.stop();
-      entry = createCard(seat, state.nodes[seat.nodeId], label, sig);
+      entry = createCard(seat, state.nodes[seat.nodeId], displayName, sig);
       cards.set(seat.seatId, entry);
     }
     const next = previous ? previous.nextElementSibling : grid.firstElementChild;
@@ -404,27 +404,21 @@ function renderGrid() {
     previous = entry.card;
   }
 }
-function createCard(seat, binding, label, sig) {
+function createCard(seat, binding, displayName, sig) {
   const card = document.createElement("article"),
-    heading = document.createElement("header"),
-    caption = document.createElement("h2"),
-    position = document.createElement("span"),
     outputs = document.createElement("div");
-  const identity = [label?.hostname ?? seat.nodeId ?? seat.seatId, label?.user]
+  const identity = [seat.nodeId, displayName]
     .filter(Boolean)
     .join(" · ");
   card.className = "seat";
-  heading.className = "seat-heading";
-  caption.className = "caption";
-  caption.textContent = caption.title = identity;
-  heading.append(caption);
   if (seat.nodeId) {
-    position.className = "seat-id";
-    position.textContent = position.title = seat.seatId;
-    heading.append(position);
+    const caption = document.createElement("h2");
+    caption.className = "caption";
+    caption.textContent = caption.title = identity;
+    card.append(caption);
   }
   outputs.className = "outputs";
-  card.append(heading, outputs);
+  card.append(outputs);
   const stops = [];
   const entry = {
     card,
@@ -456,7 +450,7 @@ function createCard(seat, binding, label, sig) {
   return entry;
 }
 function updateChoices(seats, visible) {
-  const next = JSON.stringify([storageKey, seats, state.labels]);
+  const next = JSON.stringify([storageKey, seats]);
   if (next !== choiceSignature) {
     el("choices").replaceChildren();
     for (const seat of seats) {
@@ -470,7 +464,7 @@ function updateChoices(seats, visible) {
         try { localStorage.setItem(storageKey, JSON.stringify([...hidden])); } catch {}
         renderGrid();
       };
-      label.append(check, seat.seatId + " · " + (state.labels?.[seat.nodeId]?.hostname ?? seat.nodeId));
+      label.append(check, seat.nodeId);
       el("choices").append(label);
     }
     choiceSignature = next;

@@ -146,28 +146,14 @@ body {
 .seat {
   min-width: 0;
 }
-.seat-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 6px;
-  padding: 0 2px 2px;
-}
-.caption,
-.seat-id {
+.caption {
   margin: 0;
+  padding: 0 2px 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.caption {
   font-size: 12px;
   font-weight: 650;
-}
-.seat-id {
-  flex: 0 1 auto;
-  color: var(--muted);
-  font-size: 11px;
 }
 .outputs {
   display: grid;

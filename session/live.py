@@ -7,8 +7,8 @@ import io
 import json
 import os
 import pwd
-import socket
 import re
+import socket
 import subprocess
 import time
 import uuid
@@ -31,6 +31,15 @@ from PIL import Image, ImageDraw, ImageGrab
 
 def stamp():
     return datetime.now(timezone.utc).isoformat()
+
+
+def display_name(uid):
+    try:
+        # getpwuid uses NSS, including SSSD on FreeIPA clients.
+        name = pwd.getpwuid(uid).pw_gecos.split(",", 1)[0].strip()
+    except (KeyError, OSError):
+        return None
+    return name if 0 < len(name) <= 255 else None
 
 
 def outputs(fake):
@@ -354,16 +363,12 @@ class Source:
             key, op = data["key"], data["op"]
             c = self.channels.get(key)
             if op == "describe":
-                try:
-                    user = pwd.getpwuid(os.getuid()).pw_name
-                except KeyError:
-                    user = None
                 await self.ws.send_json(
                     dict(
                         op="identity",
                         sessionId=self.session,
                         hostname=socket.gethostname(),
-                        user=user,
+                        displayName=await asyncio.to_thread(display_name, os.getuid()),
                     )
                 )
             elif op == "ticket":

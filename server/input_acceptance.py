@@ -26,7 +26,7 @@ def exercise(page, tmp, monitor):
     policy = tmp / "policy"
     config = json.loads(policy.read_text())
     rooms = config["teachers"]["local"]["rooms"]
-    second_screen = page.get_by_role("button", name="desk-1 · Экран 2")
+    second_screen = page.get_by_role("button", name="pc-01 · Экран 2")
     second_screen.click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
     assert not page.get_by_text("Включить управление").count()

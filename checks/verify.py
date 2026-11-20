@@ -45,6 +45,21 @@ def check_input():
         require(not validator.is_valid(event),"Несовместимое событие ввода принято")
 
 
+def check_session_identity():
+    schema = read(CONTRACTS / "session-identity-v1.schema.json")
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+    legacy = dict(op="identity", sessionId="login-7", hostname="lab-pc", user="student")
+    validator.validate(legacy)
+    validator.validate(dict(legacy, user=None, displayName="Анна Иванова"))
+    validator.validate(dict(legacy, displayName=None))
+    for invalid_name in ("", "а" * 256, ["Анна Иванова"]):
+        require(
+            not validator.is_valid(dict(legacy, displayName=invalid_name)),
+            "Принято неверное имя пользователя сессии",
+        )
+
+
 def check_examples():
     schema = read(CONTRACTS / "v1.schema.json")
     Draft202012Validator.check_schema(schema)
@@ -133,6 +148,7 @@ if __name__ == "__main__":
         check_examples()
         check_preview(ROOT)
         check_input()
+        check_session_identity()
         check_links()
     except (ValueError, KeyError, OSError) as exc:
         sys.exit(f"Ошибка проверки: {exc}")

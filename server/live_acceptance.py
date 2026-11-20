@@ -125,7 +125,7 @@ def check_dense_grid(context, origin, status):
                 [...document.querySelectorAll('.monitor')].every(m=>{
                   const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.right<=innerWidth&&r.bottom<=innerHeight})""")
         caption = page.locator(".caption").first
-        assert caption.inner_text() == "pc-01"  # Older node: inventory fallback.
+        assert caption.inner_text() == "pc-01"
 
         def dimensions():
             return caption.evaluate(
@@ -148,7 +148,7 @@ def check_dense_grid(context, origin, status):
             "document.querySelector('#grid').offsetWidth === document.querySelector('#viewport').clientWidth"
         )
         monitor = status["session"]["monitors"][1]["monitorId"]
-        page.get_by_role("button", name="desk-25 · Экран 2", exact=True).click()
+        page.get_by_role("button", name="pc-25 · Экран 2", exact=True).click()
         for _ in range(100):
             if any(m.get("request", {}).get("kind") == "access" for m in requests):
                 break
@@ -224,6 +224,11 @@ def check_overview_grid(context, origin, status):
         session = {**status["session"], "monitors": status["session"]["monitors"][:count]}
         nodes[node_id] = {**status, "nodeId": node_id, "session": session if count else None}
     state = dict(room=dict(roomId="lab", seats=seats[::-1]), nodes=nodes, iceServers=[])
+    state["labels"] = {
+        "pc-01": dict(hostname="actual-hostname", displayName="Анна Иванова"),
+        "pc-02": dict(hostname="legacy-hostname", user="legacy-login"),
+        "pc-03": dict(hostname="actual-hostname", displayName=None),
+    }
     page.route("**/state", lambda route: route.fulfill(json=state))
     page.route_web_socket("**/stream", lambda ws: ws.on_message(lambda _: None))
     page.add_init_script("""
@@ -242,7 +247,10 @@ def check_overview_grid(context, origin, status):
         page.goto(origin)
         page.get_by_text("Нет графической сессии").wait_for()
         cards = page.locator(".seat")
-        assert cards.locator(".seat-id").all_text_contents() == [s["seatId"] for s in seats]
+        captions = cards.locator(".caption")
+        assert captions.all_text_contents() == [
+            "pc-01 · Анна Иванова", "pc-02", "pc-03", "pc-04", "pc-05", "pc-06",
+        ]
         assert cards.evaluate_all("cards=>cards.map(c=>c.querySelectorAll('.monitor').length)") == [2, 1, 2, 1, 2, 0]
         boxes = [card.bounding_box() for card in cards.all()]
         assert boxes[0]["y"] == boxes[1]["y"] == boxes[2]["y"]
@@ -254,8 +262,8 @@ def check_overview_grid(context, origin, status):
         assert cards.first.evaluate("card => getComputedStyle(card).borderWidth") == "0px"
         dual = cards.first.locator(".monitor").all()
         assert [m.get_attribute("aria-label") for m in dual] == [
-            "desk-1 · Экран 1",
-            "desk-1 · Экран 2",
+            "pc-01 · Экран 1",
+            "pc-01 · Экран 2",
         ]
         assert not cards.locator(".connector").count()
         left, right = [m.bounding_box() for m in dual]
@@ -284,11 +292,11 @@ def check_overview_grid(context, origin, status):
         assert viewport.bounding_box()["width"] < grid_width
 
         page.get_by_role("button", name="Компьютеры").click()
-        first = page.get_by_role("checkbox", name="desk-1 · pc-01")
+        first = page.get_by_role("checkbox", name="pc-01", exact=True)
         page.wait_for_function("previewSockets.length === 8")
         first.uncheck()
         assert cards.count() == 5
-        assert cards.first.locator(".seat-id").inner_text() == "desk-2"
+        assert captions.first.inner_text() == "pc-02"
         assert page.evaluate("""previewSockets.every(({nodeId, ws}) =>
             nodeId === 'pc-01' ? ws.readyState >= WebSocket.CLOSING : ws.readyState === WebSocket.OPEN)""")
         page.reload()
@@ -297,7 +305,7 @@ def check_overview_grid(context, origin, status):
         assert pin.get_attribute("aria-pressed") == "true"
         page.get_by_role("button", name="Компьютеры").click()
         first.check()
-        assert cards.first.locator(".seat-id").inner_text() == "desk-1"
+        assert captions.first.inner_text() == "pc-01 · Анна Иванова"
         assert cards.count() == 6
         page.keyboard.press("Escape")
         assert page.locator("#choices-panel").is_hidden()
@@ -435,20 +443,31 @@ def run(tmp, stack, x11, listeners_only):
             break
         time.sleep(0.05)
 
-    def login():
-        return start(
-            [
-                sys.executable,
-                ROOT / "session/live.py",
-                "--socket",
-                tmp / "socket",
-                "--node",
-                "pc-01",
-            ]
-            + ([] if x11 else ["--synthetic"])
-        )
+    def login(name):
+        script = ROOT / "session/live.py"
+        args = ["--socket", tmp / "socket", "--node", "pc-01"]
+        if x11:
+            return start([sys.executable, script, *args])
+        mock_nss = """
+import os
+import pwd
+import runpy
+import sys
+from pathlib import Path
+from unittest.mock import patch
 
-    source = login()
+script, name, *args = sys.argv[1:]
+user = list(pwd.getpwuid(os.getuid()))
+user[0] = "ipa-login"
+user[4] = f"  {name}  ,101,555-0123"
+sys.argv = [script, *args]
+sys.path.insert(0, str(Path(script).parent))
+with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
+    runpy.run_path(script, run_name="__main__")
+"""
+        return start([sys.executable, "-c", mock_nss, script, name, *args, "--synthetic"])
+
+    source = login("Анна Иванова")
     pw = stack.enter_context(sync_playwright())
     browser = pw.chromium.launch(
         executable_path=shutil.which("chromium"), args=["--no-sandbox"]
@@ -464,19 +483,25 @@ def run(tmp, stack, x11, listeners_only):
     monitors = page.evaluate(
         "async()=> (await (await fetch('/state')).json()).nodes['pc-01'].session.monitors"
     )
-    expected_user = pwd.getpwuid(os.getuid()).pw_name
-    page.wait_for_function(
-        "text=>[...document.querySelectorAll('.caption')].some(el=>el.textContent===text)",
-        arg=socket.gethostname() + " · " + expected_user,
-    )
+    def check_caption(name):
+        if x11:
+            name = pwd.getpwuid(os.getuid()).pw_gecos.split(",", 1)[0].strip()
+        name = name if 0 < len(name) <= 255 else None
+        page.wait_for_function(
+            "async name => (await (await fetch('/state')).json()).labels?.['pc-01']?.displayName === name",
+            arg=name,
+        )
+        page.get_by_role("heading", name=f"pc-01 · {name}" if name else "pc-01", exact=True).wait_for()
+
+    check_caption("Анна Иванова")
     status = page.evaluate("async()=>(await (await fetch('/state')).json()).nodes['pc-01']")
     check_overview_grid(ctx, origin, status)
     check_dense_grid(ctx, origin, status)
     first, second = monitors
     for index, monitor in enumerate((first, second), 1):
-        label = "desk-1 · " + monitor["monitorId"]
+        label = "pc-01 · " + monitor["monitorId"]
         w, h = monitor["width"], monitor["height"]
-        page.get_by_role("button", name=f"desk-1 · Экран {index}").click()
+        page.get_by_role("button", name=f"pc-01 · Экран {index}").click()
         page.wait_for_function(
             "([w,h])=>{const v=document.querySelector('video');return v&&v.readyState>=2&&v.videoWidth===w&&v.videoHeight===h}",
             arg=[w, h],
@@ -510,7 +535,7 @@ def run(tmp, stack, x11, listeners_only):
             subprocess.run(["xrandr", *args], check=True)
 
         try:
-            page.get_by_role("button", name="desk-1 · Экран 2").click()
+            page.get_by_role("button", name="pc-01 · Экран 2").click()
             page.wait_for_function("document.querySelector('video')?.readyState>=2")
             page.wait_for_function(
                 "document.querySelector('#mode').textContent==='Управление включено'"
@@ -549,15 +574,14 @@ def run(tmp, stack, x11, listeners_only):
     source.wait()
     page.wait_for_function("document.querySelectorAll('canvas').length===0")
     page.get_by_text("Нет графической сессии").wait_for()
-    assert (
-        page.evaluate(
-            "async()=>(await (await fetch('/state')).json()).labels['pc-01'].user"
-        )
-        is None
-    )
-    login()
+    page.get_by_role("heading", name="pc-01", exact=True).wait_for()
+    assert page.evaluate(
+        "async()=>(await (await fetch('/state')).json()).labels['pc-01'].displayName"
+    ) is None
+    login("Иван Петров")
     page.wait_for_function(grid)
-    page.get_by_role("button", name="desk-1 · Экран 1").click()
+    check_caption("Иван Петров")
+    page.get_by_role("button", name="pc-01 · Экран 1").click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
     policy = json.loads((tmp / "policy").read_text())
     policy["teachers"].clear()
