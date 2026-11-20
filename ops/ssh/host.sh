@@ -122,6 +122,9 @@ release)
             if [[ -v classctl_pip_index_url ]]; then
                 export PIP_INDEX_URL="$classctl_pip_index_url"
             fi
+            if [[ -v classctl_pip_trusted_host ]]; then
+                export PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:+$PIP_TRUSTED_HOST }$classctl_pip_trusted_host"
+            fi
             "$release/.venv/bin/pip" install -r "$release/ops/requirements-live.txt" >&2
         )
         touch "$release/.ready"

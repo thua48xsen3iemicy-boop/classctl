@@ -39,6 +39,10 @@ def worker(host, *args, pip_proxy=None, pip_index_url=None):
     script = (HERE / "host.sh").read_bytes()
     # Send URLs through SSH stdin so credentials stay out of command arguments.
     settings = {"classctl_pip_proxy": pip_proxy, "classctl_pip_index_url": pip_index_url}
+    if pip_index_url is not None:
+        index = urlsplit(pip_index_url)
+        if index.scheme == "http":
+            settings["classctl_pip_trusted_host"] = index.netloc.rsplit("@", 1)[-1]
     prefix = "".join(f"{key}={shlex.quote(value)}\n"
                      for key, value in settings.items() if value is not None)
     script = prefix.encode() + script
@@ -70,6 +74,8 @@ def validate_pip_url(field, value):
     try:
         url = urlsplit(value)
         valid = url.scheme in ("http", "https") and url.hostname and url.port != 0
+        if field == "pip_index_url" and url.scheme == "http" and "*" in url.netloc.rsplit("@", 1)[-1]:
+            raise ValueError(message)
     except ValueError:
         raise ValueError(message) from None
     if not valid:
