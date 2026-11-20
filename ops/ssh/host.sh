@@ -75,27 +75,37 @@ migrate_autostart() {
 case "$action" in
 prepare)
     role=$1
-    if command -v apt-get >/dev/null; then
-        packages=(openssl ca-certificates git python3-venv)
-        if [[ $role == student ]]; then packages+=(x11-xserver-utils x11-xkb-utils); fi
-        if [[ $role == server ]]; then packages+=(curl); command -v chromium >/dev/null || packages+=(chromium); fi
-        apt-get update >&2
-        DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}" >&2
-    elif command -v emerge >/dev/null; then
-        packages=(dev-libs/openssl dev-vcs/git)
-        if [[ $role == student ]]; then packages+=(x11-apps/xrandr x11-apps/xkbcomp); fi
-        if [[ $role == server ]]; then packages+=(net-misc/curl); command -v chromium >/dev/null || packages+=(www-client/chromium); fi
-        emerge --noreplace "${packages[@]}" >&2
-    fi
-    command -v openssl python3 >/dev/null
-    command -v git >/dev/null
-    [[ -d /run/systemd/system ]] || command -v rc-service >/dev/null
-    install -d -m 755 "$base" "$var"
+    required=(openssl git python3)
     if [[ $role == student ]]; then
-        for cmd in busctl xrandr xkbcomp; do command -v "$cmd" >/dev/null; done
-        busctl --system introspect org.freedesktop.login1 /org/freedesktop/login1 >/dev/null
+        required+=(busctl xrandr xkbcomp)
+    else
+        required+=(curl)
     fi
-    install -d -m 755 "$etc"
+    if [[ -d /run/systemd/system ]]; then
+        required+=(systemctl)
+    else
+        required+=(rc-service rc-update)
+    fi
+    missing=()
+    for cmd in "${required[@]}"; do
+        command -v "$cmd" >/dev/null || missing+=("$cmd")
+    done
+    if (( ${#missing[@]} )); then
+        printf 'Missing commands on %s (%s): %s\n' "$(hostname)" "$role" "${missing[*]}" >&2
+        exit 1
+    fi
+    python=$(python_bin)
+    if ! "$python" -c 'import venv' || ! "$python" -m ensurepip --version >/dev/null; then
+        printf 'Python at %s on %s requires venv and ensurepip\n' "$python" "$(hostname)" >&2
+        exit 1
+    fi
+    if [[ $role == student ]]; then
+        if ! busctl --system introspect org.freedesktop.login1 /org/freedesktop/login1 >/dev/null; then
+            printf 'login1 is unavailable on %s\n' "$(hostname)" >&2
+            exit 1
+        fi
+    fi
+    install -d -m 755 "$base" "$var" "$etc"
     ;;
 release)
     release=$base/$1
