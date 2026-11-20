@@ -133,8 +133,8 @@ async function openView(seat, id) {
     ws, peer, seat, signature: signature(seat),
     scroll: [viewport.scrollLeft, viewport.scrollTop],
   };
-  toggleDrawer(false);
-  document.querySelector(".picker").hidden = true;
+  showChoices(false);
+  if (!sidebarPinned) showSidebar(false);
   focus = active;
   el("overview").hidden = true;
   clearGrid();
@@ -208,7 +208,7 @@ async function openView(seat, id) {
     }
   };
 }
-function preview(seat, binding, m, identity, outputs, onDisconnect) {
+function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
   const request = {
     version: 1,
     kind: "preview.subscribe",
@@ -223,21 +223,18 @@ function preview(seat, binding, m, identity, outputs, onDisconnect) {
     label = document.createElement("span");
   canvas.width = 1;
   canvas.height = 1;
-  const connector = document.createElement("span");
-  connector.className = "connector";
-  connector.textContent = m.monitorId;
   label.className = "signal";
   function signal(text) {
     label.textContent = text;
     label.dataset.quiet = String(text === "в эфире" || text === "статично");
     panel.setAttribute("aria-description", identity + " · " + text);
-    panel.title = identity + " · " + m.monitorId + " · " + text;
+    panel.title = identity + " · " + name + " · " + text;
   }
   signal("ожидание");
-  panel.append(canvas, connector, label);
+  panel.append(canvas, label);
   panel.className = "monitor";
   panel.type = "button";
-  panel.setAttribute("aria-label", seat.seatId + " · " + m.monitorId);
+  panel.setAttribute("aria-label", seat.seatId + " · " + name);
   panel.onclick = () => openView(seat, m.monitorId);
   outputs.append(panel);
   let verified = 0,
@@ -298,15 +295,66 @@ function preview(seat, binding, m, identity, outputs, onDisconnect) {
   };
 }
 let hidden = new Set(), choiceSignature, storageKey;
-function toggleDrawer(open) {
+const sidebar = el("sidebar");
+const sidebarHandle = el("sidebar-handle");
+const sidebarPanel = el("sidebar-panel");
+const sidebarPin = el("sidebar-pin");
+const sidebarPinKey = "classctl.sidebarPinned";
+let sidebarPinned = false;
+
+function showSidebar(open) {
+  sidebar.classList.toggle("open", open);
+  sidebarPanel.inert = !open;
+  sidebarHandle.setAttribute("aria-expanded", String(open));
+  sidebarHandle.textContent = open ? "‹" : "›";
+}
+function pinSidebar(pinned) {
+  sidebarPinned = pinned;
+  sidebar.classList.toggle("pinned", pinned);
+  el("overview").toggleAttribute("data-sidebar-pinned", pinned);
+  sidebarPin.setAttribute("aria-pressed", String(pinned));
+  sidebarHandle.hidden = pinned;
+  showSidebar(true);
+}
+try {
+  if (localStorage.getItem(sidebarPinKey) === "true") pinSidebar(true);
+} catch {}
+sidebarPin.onclick = () => {
+  pinSidebar(!sidebarPinned);
+  try { localStorage.setItem(sidebarPinKey, String(sidebarPinned)); } catch {}
+};
+sidebarHandle.onclick = () => showSidebar(sidebarPanel.inert);
+sidebar.onpointerenter = (event) => {
+  if (event.pointerType === "mouse" && !sidebarPinned) showSidebar(true);
+};
+sidebar.onpointerleave = (event) => {
+  if (
+    event.pointerType === "mouse" &&
+    !sidebarPinned &&
+    !sidebarPanel.querySelector(":focus-visible")
+  ) showSidebar(false);
+};
+sidebar.onfocusout = (event) => {
+  if (!sidebarPinned && !sidebar.matches(":hover") && !sidebar.contains(event.relatedTarget))
+    showSidebar(false);
+};
+document.addEventListener("pointerdown", (event) => {
+  if (!sidebarPinned && !sidebar.contains(event.target)) showSidebar(false);
+});
+
+function showChoices(open) {
   el("choices-panel").hidden = !open;
   el("tab").setAttribute("aria-expanded", String(open));
 }
-el("tab").onclick = () => toggleDrawer(el("choices-panel").hidden);
+el("tab").onclick = () => showChoices(el("choices-panel").hidden);
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !el("choices-panel").hidden) {
-    toggleDrawer(false);
+  if (event.key !== "Escape" || focus || sidebarPanel.inert) return;
+  if (!el("choices-panel").hidden) {
+    showChoices(false);
     el("tab").focus();
+  } else if (!sidebarPinned) {
+    if (sidebarPanel.contains(document.activeElement)) sidebarHandle.focus();
+    showSidebar(false);
   }
 });
 
@@ -327,13 +375,13 @@ function renderGrid() {
   const visible = computers.filter((seat) => !hidden.has(seat.nodeId));
   updateChoices(computers, visible);
   const seats = ordered.filter((seat) => !hidden.has(seat.nodeId));
-  document.querySelector(".picker").hidden = !computers.length;
+  el("tab").hidden = !computers.length;
+  if (!computers.length) showChoices(false);
   const emptyMessage = "Все компьютеры скрыты. Выберите нужные в панели «Компьютеры».";
   if (computers.length && !visible.length) el("notice").textContent = emptyMessage;
   else if (el("notice").textContent === emptyMessage) el("notice").textContent = "";
   const grid = el("grid");
   grid.style.setProperty("--columns", Math.max(1, Math.ceil(Math.sqrt(seats.length))));
-  grid.toggleAttribute("data-spacious", seats.length <= 9);
   grid.toggleAttribute("data-one-seat", seats.length === 1);
   const ids = new Set(seats.map((s) => s.seatId));
   for (const [id, entry] of cards)
@@ -388,9 +436,9 @@ function createCard(seat, binding, label, sig) {
   };
   const monitors = binding?.session?.monitors ?? [];
   outputs.style.setProperty("--outputs", monitors.length || 1);
-  for (const monitor of monitors) {
+  for (const [index, monitor] of monitors.entries()) {
     stops.push(
-      preview(seat, binding, monitor, identity, outputs, () => {
+      preview(seat, binding, monitor, "Экран " + (index + 1), identity, outputs, () => {
         entry.signature = null;
       }),
     );
@@ -444,8 +492,8 @@ async function poll() {
     } else renderGrid();
   } catch {
     state = null;
-    toggleDrawer(false);
-    document.querySelector(".picker").hidden = true;
+    showChoices(false);
+    el("tab").hidden = true;
     closeFocus();
     clearGrid();
     el("room-name").textContent = "";
