@@ -115,7 +115,12 @@ release)
         fi
         git -C "$release" checkout --detach "$1"
         "$(python_bin)" -m venv "$release/.venv"
-        "$release/.venv/bin/pip" install -r "$release/ops/requirements-live.txt" >&2
+        (
+            if [[ -v classctl_pip_proxy ]]; then
+                export PIP_PROXY="$classctl_pip_proxy"
+            fi
+            "$release/.venv/bin/pip" install -r "$release/ops/requirements-live.txt" >&2
+        )
         touch "$release/.ready"
     fi
     ;;
