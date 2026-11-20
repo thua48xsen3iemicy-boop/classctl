@@ -194,6 +194,10 @@ class Relay(AccessPolicy):
                             and session["sessionId"] == data.get("sessionId")
                             and SESSION_IDENTITY.is_valid(data)
                         ):
+                            if "displayName" not in data:
+                                print(f"{ident}: процесс сессии не поддерживает GECOS", flush=True)
+                            elif data["displayName"] is None:
+                                print(f"{ident}: GECOS пока недоступен", flush=True)
                             self.labels[ident] = dict(
                                 sessionId=session["sessionId"],
                                 hostname=data["hostname"],

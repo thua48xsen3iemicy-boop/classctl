@@ -443,29 +443,51 @@ def run(tmp, stack, x11, listeners_only):
             break
         time.sleep(0.05)
 
-    def login(name):
+    sssd_ready = tmp / "sssd-ready"
+
+    def login(name, retry_sssd=False):
         script = ROOT / "session/live.py"
         args = ["--socket", tmp / "socket", "--node", "pc-01"]
         if x11:
             return start([sys.executable, script, *args])
-        mock_nss = """
+        mock_nss = r"""
 import os
 import pwd
 import runpy
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
-script, name, *args = sys.argv[1:]
+script, name, sssd_ready, *args = sys.argv[1:]
+uid = os.getuid()
 user = list(pwd.getpwuid(os.getuid()))
 user[0] = "ipa-login"
-user[4] = f"  {name}  ,101,555-0123"
+gecos = f"  {name}  ,101,555-0123"
+user[4] = "" if sssd_ready else gecos
+real_check_output = subprocess.check_output
+attempts = 0
+
+def check_output(command, **kwargs):
+    global attempts
+    if command != ["getent", "-s", "sss", "passwd", str(uid)]:
+        return real_check_output(command, **kwargs)
+    assert sssd_ready
+    attempts += 1
+    if attempts == 1 or not Path(sssd_ready).exists():
+        raise subprocess.CalledProcessError(2, command)
+    return f"ipa-login:*:{uid}:{user[3]}:{gecos}:/home/ipa-login:/bin/bash\n"
+
 sys.argv = [script, *args]
 sys.path.insert(0, str(Path(script).parent))
-with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
+with (
+    patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)),
+    patch("subprocess.check_output", side_effect=check_output),
+):
     runpy.run_path(script, run_name="__main__")
 """
-        return start([sys.executable, "-c", mock_nss, script, name, *args, "--synthetic"])
+        ready_path = sssd_ready if retry_sssd else ""
+        return start([sys.executable, "-c", mock_nss, script, name, ready_path, *args, "--synthetic"])
 
     source = login("Анна Иванова")
     pw = stack.enter_context(sync_playwright())
@@ -578,8 +600,11 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     assert page.evaluate(
         "async()=>(await (await fetch('/state')).json()).labels['pc-01'].displayName"
     ) is None
-    login("Иван Петров")
+    login("Иван Петров", retry_sssd=True)
     page.wait_for_function(grid)
+    if not x11:
+        assert page.get_by_role("heading", name="pc-01", exact=True).count() == 1
+        sssd_ready.touch()
     check_caption("Иван Петров")
     page.get_by_role("button", name="pc-01 · Экран 1").click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
