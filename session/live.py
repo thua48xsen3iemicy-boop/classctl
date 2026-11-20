@@ -13,6 +13,7 @@ import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
+from fractions import Fraction
 
 from aiohttp import ClientError, ClientSession, UnixConnector, WSMsgType
 from aiortc import (
@@ -21,6 +22,7 @@ from aiortc import (
     RTCSessionDescription,
     VideoStreamTrack,
 )
+from aiortc.mediastreams import MediaStreamError
 from av import VideoFrame
 from remote_input import Controller
 from PIL import Image, ImageDraw, ImageGrab
@@ -136,18 +138,34 @@ def capture_previews(monitors, fake, previous):
 
 
 class ScreenTrack(VideoStreamTrack):
+    frame_interval = 1 / 15
+    rtp_time_base = Fraction(1, 90_000)
+
     def __init__(self, source, channel):
         super().__init__()
         self.source = source
         self.channel = channel
+        self.started_at = None
+        self.last_capture_at = None
 
     async def recv(self):
-        pts, base = await self.next_timestamp()
+        now = time.monotonic()
+        if self.last_capture_at is not None:
+            delay = self.last_capture_at + self.frame_interval - now
+            if delay > 0:
+                await asyncio.sleep(delay)
+        if self.readyState != "live":
+            raise MediaStreamError
         self.source.check(self.channel)
+        self.last_capture_at = time.monotonic()
+        if self.started_at is None:
+            self.started_at = self.last_capture_at
+        elapsed = self.last_capture_at - self.started_at
         image = await asyncio.to_thread(self.source.image, self.channel)
         self.source.check(self.channel)
         frame = VideoFrame.from_image(image)
-        frame.pts, frame.time_base = pts, base
+        frame.pts = round(elapsed / self.rtp_time_base)
+        frame.time_base = self.rtp_time_base
         return frame
 
 
