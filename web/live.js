@@ -54,6 +54,12 @@ function clearGrid() {
   cards.clear();
   el("grid").replaceChildren();
 }
+function closeConnection(connection) {
+  connection.cleanup?.();
+  connection.ws.close();
+  connection.peer.close();
+  connection.video.remove();
+}
 function closeFocus() {
   if (!focus) return;
   const current = focus;
@@ -61,10 +67,7 @@ function closeFocus() {
   setDrawer(false);
   if (document.fullscreenElement === el("focus"))
     document.exitFullscreen().catch(() => {});
-  current.cleanup?.();
-  current.ws.close();
-  current.peer.close();
-  el("focus").querySelector("video")?.remove();
+  if (current.connection) closeConnection(current.connection);
   el("focus").hidden = true;
   el("overview").hidden = false;
   return current.scroll;
@@ -78,7 +81,7 @@ el("back").onclick = back;
 function setDrawer(open) {
   el("tools").classList.toggle("open", open);
   el("handle").setAttribute("aria-expanded", String(open));
-  el("handle").textContent = open ? "›" : "‹";
+  el("handle").textContent = open ? "‹" : "›";
   el("drawer").inert = !open;
 }
 el("tools").onpointerenter = (e) => {
@@ -87,7 +90,7 @@ el("tools").onpointerenter = (e) => {
 el("tools").onpointerleave = (e) => {
   if (
     e.pointerType === "mouse" &&
-    !el("drawer").contains(document.activeElement)
+    !el("drawer").querySelector(":focus-visible")
   )
     setDrawer(false);
 };
@@ -96,7 +99,8 @@ el("handle").onclick = (e) =>
     e.pointerType === "mouse" || !el("tools").classList.contains("open"),
   );
 el("tools").onfocusout = (e) => {
-  if (!el("tools").contains(e.relatedTarget)) setDrawer(false);
+  if (!el("tools").contains(e.relatedTarget) && !el("tools").matches(":hover"))
+    setDrawer(false);
 };
 document.addEventListener("fullscreenchange", () => {
   if (!focus) return;
@@ -124,18 +128,14 @@ function signature(seat) {
     state.wheelNodes?.includes(seat.nodeId),
   ]);
 }
-async function openView(seat, id) {
-  const binding = state.nodes[seat.nodeId];
-  const control = state.controlNodes?.includes(seat.nodeId) ?? false;
-  const ws = socket(control),
-    peer = new RTCPeerConnection({ iceServers: state.iceServers });
-  const active = {
-    ws, peer, seat, signature: signature(seat),
+function openView(seat, id) {
+  const view = {
+    seat, signature: signature(seat),
     scroll: [viewport.scrollLeft, viewport.scrollTop],
   };
   showChoices(false);
   if (!sidebarPinned) showSidebar(false);
-  focus = active;
+  focus = view;
   el("overview").hidden = true;
   clearGrid();
   el("focus").hidden = false;
@@ -143,10 +143,24 @@ async function openView(seat, id) {
   el("focus")
     .requestFullscreen?.()
     .then(() => {
-      active.fullscreen = true;
+      view.fullscreen = true;
     })
     .catch(() => {});
   el("notice").textContent = "";
+  connectMonitor(view, id);
+}
+function connectMonitor(view, id) {
+  const { seat } = view;
+  const binding = state.nodes[seat.nodeId];
+  const control = state.controlNodes?.includes(seat.nodeId) ?? false;
+  const ws = socket(control);
+  const peer = new RTCPeerConnection({ iceServers: state.iceServers });
+  const video = document.createElement("video");
+  const active = { ws, peer, video, id };
+  const isCurrent = () => focus === view && view.connection === active;
+  view.connection = active;
+  el("swap").hidden = binding.session.monitors.length !== 2;
+  el("swap").removeAttribute("aria-disabled");
   el("target").textContent = seat.nodeId + " · " + id;
   el("mode").textContent = "Подключение…";
   const request = {
@@ -158,12 +172,11 @@ async function openView(seat, id) {
     mode: control ? "control" : "view",
     target: { scope: "monitor", monitorId: id },
   };
-  const video = document.createElement("video");
   video.autoplay = true;
   video.muted = true;
   video.playsInline = true;
   video.onplaying = () => {
-    if (focus !== active || active.playing) return;
+    if (!isCurrent() || active.playing) return;
     active.playing = true;
 
     if (control) {
@@ -175,7 +188,7 @@ async function openView(seat, id) {
   };
   el("focus").append(video);
   const stop = () => {
-    if (focus !== active) return;
+    if (!isCurrent()) return;
     back();
     el("notice").textContent = "Соединение с монитором завершено";
   };
@@ -201,13 +214,31 @@ async function openView(seat, id) {
             if (peer.iceGatheringState === "complete") resolve();
           };
         });
-      if (focus === active)
+      if (isCurrent())
         ws.send(JSON.stringify({ request, offer: peer.localDescription }));
     } catch {
       stop();
     }
   };
 }
+el("swap").onclick = async () => {
+  const view = focus;
+  const current = view?.connection;
+  if (!current) return;
+  const monitors = state.nodes[view.seat.nodeId].session.monitors;
+  if (monitors.length !== 2) return;
+  const other = monitors.find((monitor) => monitor.monitorId !== current.id);
+  view.connection = null;
+  el("swap").setAttribute("aria-disabled", "true");
+  el("mode").textContent = "Подключение…";
+  // The coordinator acknowledges closure after releasing exclusive control.
+  const closed = new Promise((resolve) =>
+    current.ws.addEventListener("close", resolve, { once: true }),
+  );
+  closeConnection(current);
+  await closed;
+  if (focus === view) connectMonitor(view, other.monitorId);
+};
 function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
   const request = {
     version: 1,

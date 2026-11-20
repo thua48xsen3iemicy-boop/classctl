@@ -42,8 +42,17 @@ def exercise(page, tmp, monitor):
     page.wait_for_function(
         "document.querySelector('#mode').textContent==='Управление включено'"
     )
-    # The drawer owns its own pointer events while remote input is enabled.
     page.locator("#handle").hover()
+    swap = page.get_by_role("button", name="Другой монитор")
+    for target in ("DUMMY0", monitor["monitorId"]):
+        swap.click()
+        page.wait_for_function(
+            """target => document.querySelector('#target').textContent === 'pc-01 · ' + target &&
+                document.querySelector('#mode').textContent === 'Управление включено' &&
+                pcs.at(-2).connectionState === 'closed'""",
+            arg=target,
+        )
+    # The drawer owns its own pointer events while remote input is enabled.
     page.wait_for_function("!document.querySelector('#drawer').inert")
     page.evaluate("""()=>{window.toolbarClicks=[];const ws=sockets.at(-1),send=ws.send.bind(ws);
       ws.send=data=>{const msg=JSON.parse(data);if(msg.kind==='button')toolbarClicks.push(msg);send(data)}}""")
