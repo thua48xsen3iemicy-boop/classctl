@@ -37,6 +37,8 @@ command_args="$args"
 command_user="$account"
 supervisor=supervise-daemon
 respawn_delay=3
+respawn_max=10
+respawn_period=60
 depend() { need net; }
 EOF
         chmod 755 "/etc/init.d/$name"
@@ -186,16 +188,33 @@ EOF
 check)
     url=$1
     shift
+    previous=
     for attempt in {1..20}; do
-        if curl --noproxy '*' -fsS --max-time 4 "$url/state" | python3 -c '
+        if response=$(curl --noproxy '*' -fsS --max-time 4 "$url/state" 2>&1); then
+            if status=$(python3 -c '
 import json, sys
-nodes = json.load(sys.stdin)["nodes"]
-offline = [n for n in sys.argv[1:] if nodes.get(n, {}).get("availability") != "online"]
+try:
+    nodes = json.load(sys.stdin)["nodes"]
+    offline = [n for n in sys.argv[1:] if nodes.get(n, {}).get("availability") != "online"]
+except (ValueError, KeyError, TypeError, AttributeError):
+    print("Waiting for a valid /state response")
+    sys.exit(1)
 if offline:
-    sys.exit("Waiting for: " + ", ".join(offline))
-' "$@"; then exit 0; fi
+    print("Waiting for: " + ", ".join(offline))
+    sys.exit(1)
+' "$@" <<< "$response"); then
+                exit 0
+            fi
+        else
+            status="Waiting for $url/state ($response)"
+        fi
+        if [[ $status != "$previous" ]]; then
+            printf '%s\n' "$status" >&2
+            previous=$status
+        fi
         sleep 1
     done
+    printf 'Readiness check timed out: %s\n' "$previous" >&2
     exit 1
     ;;
 *) exit 2 ;;
