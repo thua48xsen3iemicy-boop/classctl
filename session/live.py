@@ -14,9 +14,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from fractions import Fraction
-from threading import Lock
 
-import av
 from aiohttp import ClientError, ClientSession, UnixConnector, WSMsgType
 from aiortc import (
     RTCConfiguration,
@@ -26,10 +24,9 @@ from aiortc import (
 )
 from aiortc.codecs import vpx
 from aiortc.mediastreams import MediaStreamError
+from av import VideoFrame
 from remote_input import Controller
 from PIL import Image, ImageDraw, ImageGrab
-
-SCREEN_FPS = 15
 
 
 def stamp():
@@ -141,77 +138,14 @@ def capture_previews(monitors, fake, previous):
     return previews
 
 
-class ScreenCapture:
-    def __init__(self, monitors, synthetic):
-        self.monitors = monitors
-        self.synthetic = synthetic
-        self.container = None
-        self.frames = None
-        self.lock = Lock()
-        self.closed = False
-        self.region = bounds(monitors)
-        self.direct = not synthetic and min(self.region[:2]) >= 0
-
-    def read(self):
-        with self.lock:
-            if self.closed:
-                raise MediaStreamError
-            if self.direct:
-                try:
-                    if self.container is None:
-                        x, y, right, bottom = self.region
-                        self.container = av.open(
-                            os.environ["DISPLAY"],
-                            format="x11grab",
-                            options={
-                                "grab_x": str(x),
-                                "grab_y": str(y),
-                                "video_size": f"{right - x}x{bottom - y}",
-                                "framerate": str(SCREEN_FPS),
-                                "draw_mouse": "0",
-                                "probesize": "32",
-                                "analyzeduration": "1",
-                            },
-                            timeout=(1, 1),
-                        )
-                        self.frames = self.container.decode(video=0)
-                    return next(self.frames)
-                except (av.FFmpegError, ValueError, StopIteration) as error:
-                    reason = str(error) or type(error).__name__
-                    print(
-                        f"Захват x11grab недоступен, используется Pillow: {reason}",
-                        flush=True,
-                    )
-                    self.direct = False
-                    self.close_input()
-            return av.VideoFrame.from_image(capture(self.monitors, None, self.synthetic))
-
-    def close_input(self):
-        self.frames = None
-        if self.container is not None:
-            self.container.close()
-            self.container = None
-
-    def close(self):
-        with self.lock:
-            self.closed = True
-            self.close_input()
-
-
 class ScreenTrack(VideoStreamTrack):
-    frame_interval = 1 / SCREEN_FPS
+    frame_interval = 1 / 15
     rtp_time_base = Fraction(1, 90_000)
 
     def __init__(self, source, channel):
         super().__init__()
         self.source = source
         self.channel = channel
-        target = channel["req"]["target"].get("monitorId")
-        monitors = [
-            m for m in source.monitors if target is None or m["monitorId"] == target
-        ]
-        self.capture = ScreenCapture(monitors, source.args.synthetic)
-        self.capture_cleanup = None
         self.started_at = None
         self.last_capture_at = None
 
@@ -228,20 +162,12 @@ class ScreenTrack(VideoStreamTrack):
         if self.started_at is None:
             self.started_at = self.last_capture_at
         elapsed = self.last_capture_at - self.started_at
-        frame = await asyncio.to_thread(self.capture.read)
-        if self.readyState != "live":
-            raise MediaStreamError
+        image = await asyncio.to_thread(self.source.image, self.channel)
         self.source.check(self.channel)
+        frame = VideoFrame.from_image(image)
         frame.pts = round(elapsed / self.rtp_time_base)
         frame.time_base = self.rtp_time_base
         return frame
-
-    def stop(self):
-        if self.readyState == "live":
-            super().stop()
-            self.capture_cleanup = asyncio.create_task(
-                asyncio.to_thread(self.capture.close)
-            )
 
 
 class Source:
@@ -274,20 +200,19 @@ class Source:
         ):
             raise ValueError("Expired capture binding")
 
+    def image(self, c):
+        req = c["req"]
+        monitor = req.get("monitorId") or req.get("target", {}).get("monitorId")
+        return capture(self.monitors, monitor, self.args.synthetic)
+
     async def close(self, key):
         c = self.channels.pop(key, None)
         if c:
             c["until"] = 0
-            try:
-                if "controller" in c:
-                    c["controller"].close()
-                if "peer" in c:
-                    await c["peer"].close()
-            finally:
-                track = c.get("track")
-                if track is not None:
-                    track.stop()
-                    await asyncio.shield(track.capture_cleanup)
+            if "controller" in c:
+                c["controller"].close()
+            if "peer" in c:
+                await c["peer"].close()
 
     def freshness(self):
         previews = [
@@ -469,11 +394,10 @@ class Source:
                         c["inputUntil"] = time.monotonic() + 5
                     peer = RTCPeerConnection(RTCConfiguration(iceServers=[]))
                     c["peer"] = peer
-                    c["track"] = ScreenTrack(self, c)
                     await peer.setRemoteDescription(
                         RTCSessionDescription(**data["offer"])
                     )
-                    peer.addTrack(c["track"])
+                    peer.addTrack(ScreenTrack(self, c))
                     await peer.setLocalDescription(await peer.createAnswer())
                     await self.ws.send_json(
                         dict(
