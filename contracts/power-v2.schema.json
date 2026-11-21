@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "classctl power v2 portal request",
+  "type": "object",
+  "properties": {
+    "actionId": { "$ref": "urn:classctl:power:v1#/properties/actionId" },
+    "nodeIds": {
+      "type": "array",
+      "items": { "$ref": "urn:classctl:control:v1#/$defs/id" },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  },
+  "required": ["actionId", "nodeIds"],
+  "additionalProperties": false
+}

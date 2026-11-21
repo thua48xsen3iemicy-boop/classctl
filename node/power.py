@@ -6,7 +6,7 @@ import subprocess
 from contextlib import closing
 from datetime import datetime, timezone
 
-from actions.power import PARAMETERS, REBOOT, SHUTDOWN, TTL, WIRE, result
+from actions.power import PARAMETERS, REBOOT, SHUTDOWN, TTL, WIRE, outcome, result
 
 METHODS = {SHUTDOWN: "PowerOff", REBOOT: "Reboot"}
 
@@ -33,7 +33,7 @@ class Power:
         except sqlite3.Error as error:
             print(f"Power journal: {error}", flush=True)
             state, reason = "unknown", "unconfirmed"
-        return result(request_id, self.node_id, state, reason)
+        return result(request_id, [outcome(self.node_id, state, reason)])
 
     def execute(self, request):
         method = METHODS.get(request["actionId"])

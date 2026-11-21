@@ -15,13 +15,9 @@
             <h1>Аудитория <span id="room-name"></span></h1>
             <button id="sidebar-pin" type="button" aria-pressed="false" aria-label="Закрепить панель">Закрепить</button>
           </div>
-          <section id="power" aria-label="Питание компьютера" hidden>
-            <select id="power-node" aria-label="Компьютер для выключения или перезагрузки" disabled>
-              <option value="">Выберите компьютер</option>
-            </select>
-            <button id="shutdown" type="button" disabled>Выключить компьютер</button>
-            <button id="reboot" type="button" disabled>Перезагрузить компьютер</button>
-            <p id="power-status" role="status"></p>
+          <section id="power" aria-label="Питание компьютеров аудитории" hidden>
+            <button type="button" data-action="system.shutdown" disabled>Выключить все компьютеры</button>
+            <button type="button" data-action="system.reboot" disabled>Перезагрузить все компьютеры</button>
           </section>
           <button id="tab" type="button" aria-expanded="false" aria-controls="choices-panel" hidden>Компьютеры</button>
           <section id="choices-panel" hidden>
@@ -31,6 +27,12 @@
         </div>
       </aside>
       <div id="viewport"><main id="grid" aria-label="Рабочие места"></main></div>
+      <div id="power-menu" role="menu" aria-labelledby="power-menu-label" tabindex="-1" hidden>
+        <strong id="power-menu-label" role="presentation"></strong>
+        <button type="button" role="menuitem" tabindex="-1" data-action="system.shutdown">Выключить</button>
+        <button type="button" role="menuitem" tabindex="-1" data-action="system.reboot">Перезагрузить</button>
+      </div>
+      <p id="power-status" role="status"></p>
     </div>
     <section id="focus" hidden>
       <nav id="tools" aria-label="Панель монитора">

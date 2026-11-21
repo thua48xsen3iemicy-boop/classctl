@@ -127,46 +127,55 @@ class Relay(AccessPolicy):
             command = await request.json()
         except ValueError:
             raise web.HTTPBadRequest() from None
-        if not power.PORTAL.is_valid(command):
+        if power.PORTAL_GROUP.is_valid(command):
+            targets = command["nodeIds"]
+        elif power.PORTAL.is_valid(command):
+            targets = [command["nodeId"]]
+        else:
             raise web.HTTPBadRequest()
         policy = self.policy()
         if power.PERMISSION not in self.require_view(policy):
             raise web.HTTPForbidden()
-        node_id = command["nodeId"]
-        if node_id not in self.nodes:
+        if any(node_id not in self.nodes for node_id in targets):
             raise web.HTTPNotFound()
         request_id = secrets.token_hex(16)
-        target = dict(command, requestId=request_id)
+        # Allow a small clock difference while keeping both clocks inside the TTL.
+        issued = datetime.now(timezone.utc) - timedelta(seconds=2)
+        operation = dict(
+            version=1, kind="action.request", requestId=request_id,
+            actionId=command["actionId"], issuedAt=issued.isoformat(),
+            expiresAt=(issued + timedelta(seconds=power.TTL)).isoformat(), parameters={},
+        )
+        outcomes = await asyncio.gather(*(
+            self.dispatch_power(policy, node_id, operation) for node_id in targets
+        ))
+        return web.json_response(
+            power.result(request_id, outcomes), headers={"Cache-Control": "no-store"}
+        )
+
+    async def dispatch_power(self, policy, node_id, operation):
+        request_id = operation["requestId"]
+        target = dict(actionId=operation["actionId"], nodeId=node_id, requestId=request_id)
         rejection = self.power_rejection(policy, node_id)
         if rejection or node_id in self.power_requests:
-            response = power.result(request_id, node_id, "rejected", rejection or "busy")
+            outcome = power.outcome(node_id, "rejected", rejection or "busy")
         else:
             source = self.sources[node_id]
-            # Allow a small clock difference while keeping both clocks inside the TTL.
-            issued = datetime.now(timezone.utc) - timedelta(seconds=2)
-            operation = dict(
-                version=1, kind="action.request", requestId=request_id,
-                actionId=command["actionId"], nodeIds=[node_id],
-                issuedAt=issued.isoformat(),
-                expiresAt=(issued + timedelta(seconds=power.TTL)).isoformat(),
-                parameters={},
-            )
             self.audit(LOCAL_SUBJECT, "power", target, "issued")
             pending = asyncio.get_running_loop().create_future()
             self.power_requests[node_id] = (request_id, source, pending)
             try:
                 async with asyncio.timeout(6):
-                    await source.send_json(operation)
-                    response = await pending
+                    await source.send_json(dict(operation, nodeIds=[node_id]))
+                    outcome = await pending
             except (ConnectionError, TimeoutError):
-                response = power.result(request_id, node_id, "unknown", "unconfirmed")
+                outcome = power.outcome(node_id, "unknown", "unconfirmed")
             finally:
                 self.power_requests.pop(node_id, None)
-        outcome = response["outcomes"][0]
         self.audit(
             LOCAL_SUBJECT, "power", dict(target, reason=outcome["reason"]), outcome["state"]
         )
-        return web.json_response(response, headers={"Cache-Control": "no-store"})
+        return outcome
 
     def receive_power_result(self, node_id, source, data):
         pending = self.power_requests.get(node_id)
@@ -181,7 +190,7 @@ class Relay(AccessPolicy):
             and outcomes[0]["nodeId"] == node_id
             and outcomes[0]["state"] != "accepted"
         ):
-            future.set_result(data)
+            future.set_result(outcomes[0])
 
     async def browser(self, request):
         self.require_view()
@@ -372,8 +381,7 @@ class Relay(AccessPolicy):
             self.nodes[ident].disconnect()
             pending = self.power_requests.get(ident)
             if pending and pending[1] is ws and not pending[2].done():
-                request_id, _, future = pending
-                future.set_result(power.result(request_id, ident, "unknown", "unconfirmed"))
+                pending[2].set_result(power.outcome(ident, "unknown", "unconfirmed"))
             for dest, source, _, _ in list(self.channels.values()):
                 if source is ws:
                     await dest.close()

@@ -110,33 +110,53 @@ body {
   gap: 6px;
   margin-bottom: 12px;
 }
-#power select,
 #power button {
   width: 100%;
   min-width: 0;
   padding: 6px;
   border-radius: 6px;
 }
-#power select {
-  color: var(--text);
-  background: var(--surface);
+#power-menu {
+  position: fixed;
+  z-index: 4;
+  width: max-content;
+  max-width: calc(100vw - 8px);
+  padding: 4px;
   border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px #0008;
+}
+#power-menu-label {
+  display: block;
+  padding: 4px 8px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+#power-menu button {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
   font: inherit;
+  cursor: pointer;
+}
+#power-menu button:hover:not(:disabled),
+#power-menu button:focus-visible {
+  background: var(--border);
 }
 #sidebar #power button:disabled {
   border-color: var(--border);
   cursor: default;
 }
-#power :disabled {
+#power button:disabled,
+#power-menu button:disabled {
   opacity: 0.55;
-}
-#power-status {
-  margin: 0;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-#power-status:empty {
-  display: none;
+  cursor: default;
 }
 #viewport {
   grid-column: 2;
@@ -179,6 +199,15 @@ body {
 }
 .seat {
   min-width: 0;
+}
+.seat[data-selected],
+.seat:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+.seat:focus-visible:not([data-selected]) {
+  outline-style: dashed;
 }
 .caption {
   display: flex;
@@ -322,7 +351,8 @@ button:focus-visible,
   object-fit: contain;
   outline: 0;
 }
-#notice {
+#notice,
+#power-status {
   position: fixed;
   z-index: 3;
   bottom: 14px;
@@ -337,7 +367,13 @@ button:focus-visible,
   background: var(--surface);
   color: var(--text);
 }
-#notice:empty {
+#power-status {
+  top: 14px;
+  bottom: auto;
+  pointer-events: none;
+}
+#notice:empty,
+#power-status:empty {
   display: none;
 }
 

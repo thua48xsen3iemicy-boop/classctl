@@ -133,6 +133,7 @@ function openView(seat, id) {
     seat, signature: signature(seat),
     scroll: [viewport.scrollLeft, viewport.scrollTop],
   };
+  closePowerMenu();
   showChoices(false);
   if (!sidebarPinned) showSidebar(false);
   focus = view;
@@ -373,9 +374,13 @@ document.addEventListener("pointerdown", (event) => {
   if (!sidebarPinned && !sidebar.contains(event.target)) showSidebar(false);
 });
 
-const powerNode = el("power-node");
+const grid = el("grid");
+const powerPanel = el("power");
+const powerMenu = el("power-menu");
 const powerStatus = el("power-status");
-const powerButtons = [el("shutdown"), el("reboot")];
+const powerButtons = [...powerPanel.querySelectorAll("button")];
+const menuButtons = [...powerMenu.querySelectorAll("button")];
+const selectedNodes = new Set();
 const powerMessages = {
   "handed-off": "Команда передана системе",
   offline: "Компьютер вне сети",
@@ -386,54 +391,153 @@ const powerMessages = {
   "system-error": "Система отклонила команду",
   unconfirmed: "Выполнение команды не подтверждено",
 };
-let powerOptions, powerPending = false;
+let powerPending = false, menuTargets = [], menuTrigger;
 
 function renderPower() {
   const nodes = state?.powerNodes;
   const available = Array.isArray(nodes);
-  el("power").hidden = !available;
-  if (!available) return;
-  const next = JSON.stringify(nodes);
-  if (powerOptions !== next) {
-    const selected = powerNode.value;
-    const prompt = nodes.length ? "Выберите компьютер" : "Нет доступных компьютеров";
-    powerNode.replaceChildren(new Option(prompt, ""), ...nodes.map((id) => new Option(id, id)));
-    powerNode.value = nodes.includes(selected) ? selected : "";
-    powerOptions = next;
+  powerPanel.hidden = !available;
+  if (!available) {
+    selectedNodes.clear();
+    closePowerMenu();
   }
-  powerNode.disabled = powerPending || !nodes.length;
-  for (const button of powerButtons) button.disabled = powerPending || !powerNode.value;
+  for (const button of powerButtons) button.disabled = powerPending || !nodes?.length;
+  const menuDisabled = powerPending || !menuTargets.some((id) => nodes?.includes(id));
+  for (const button of menuButtons) button.disabled = menuDisabled;
 }
 
-async function sendPower(button) {
-  const nodeId = powerNode.value;
-  if (powerPending || !state?.powerNodes?.includes(nodeId)) return;
-  if (!window.confirm(`${button.textContent} ${nodeId}? Несохранённые данные могут быть потеряны.`)) return;
+function formatPowerResult(outcomes) {
+  if (outcomes.length === 1) {
+    const { nodeId, reason } = outcomes[0];
+    return `${nodeId} · ${powerMessages[reason] || "Действие отклонено"}`;
+  }
+  const failures = new Map();
+  let succeeded = 0;
+  for (const { state, reason } of outcomes) {
+    if (state === "succeeded") succeeded++;
+    else failures.set(reason, (failures.get(reason) || 0) + 1);
+  }
+  return [
+    `Команда передана системе: ${succeeded} из ${outcomes.length}`,
+    ...Array.from(failures, ([reason, count]) => `${powerMessages[reason] || "Действие отклонено"}: ${count}`),
+  ].join(" · ");
+}
+
+async function sendPower(button, nodeIds, scope) {
+  if (powerPending || !nodeIds.some((id) => state?.powerNodes?.includes(id))) return;
+  if (!window.confirm(`${button.textContent} ${scope}? Несохранённые данные могут быть потеряны.`)) return;
   powerPending = true;
-  powerStatus.textContent = `${nodeId} · Отправка команды…`;
+  powerStatus.textContent = "Отправка команды…";
   renderPower();
   try {
     const response = await fetch("/power", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actionId: "system." + button.id, nodeId }),
+      body: JSON.stringify({ actionId: button.dataset.action, nodeIds }),
     });
     if (response.status === 403) {
-      powerStatus.textContent = `${nodeId} · Недостаточно прав`;
+      powerStatus.textContent = "Недостаточно прав";
       return;
     }
     if (!response.ok) throw Error();
     const { outcomes } = await response.json();
-    powerStatus.textContent = `${nodeId} · ${powerMessages[outcomes[0].reason] || "Действие отклонено"}`;
+    powerStatus.textContent = formatPowerResult(outcomes);
   } catch {
-    powerStatus.textContent = `${nodeId} · Выполнение команды не подтверждено`;
+    powerStatus.textContent = "Выполнение команды не подтверждено";
   } finally {
     powerPending = false;
     renderPower();
   }
 }
-powerNode.onchange = renderPower;
-for (const button of powerButtons) button.onclick = () => sendPower(button);
+
+for (const button of powerButtons) button.onclick = () => {
+  const nodeIds = [...(state?.powerNodes ?? [])];
+  sendPower(button, nodeIds, `аудитории (${nodeIds.length} доступно)`);
+};
+
+function reflectSelection(card) {
+  const id = card.dataset.nodeId;
+  const selected = selectedNodes.has(id);
+  card.toggleAttribute("data-selected", selected);
+  card.setAttribute("aria-label", selected ? `${id}, выбран` : id);
+}
+
+function toggleSelection(card) {
+  const id = card.dataset.nodeId;
+  if (selectedNodes.has(id)) selectedNodes.delete(id);
+  else selectedNodes.add(id);
+  reflectSelection(card);
+}
+
+function openPowerMenu(card, x, y) {
+  const id = card.dataset.nodeId;
+  menuTargets = selectedNodes.has(id) ? [...selectedNodes] : [id];
+  menuTrigger = card.contains(document.activeElement) ? document.activeElement : card;
+  el("power-menu-label").textContent = menuTargets.length === 1 ? id : `Выбрано ${menuTargets.length} ПК`;
+  powerMenu.hidden = false;
+  renderPower();
+  powerMenu.style.left = `${Math.max(0, Math.min(x, innerWidth - powerMenu.offsetWidth))}px`;
+  powerMenu.style.top = `${Math.max(0, Math.min(y, innerHeight - powerMenu.offsetHeight))}px`;
+  (menuButtons[0].disabled ? powerMenu : menuButtons[0]).focus({ preventScroll: true });
+}
+
+function closePowerMenu(restoreFocus = false) {
+  if (powerMenu.hidden) return;
+  powerMenu.hidden = true;
+  if (restoreFocus) menuTrigger?.focus({ preventScroll: true });
+  menuTargets = [];
+  menuTrigger = null;
+}
+
+for (const button of menuButtons) button.onclick = () => {
+  const targets = menuTargets;
+  closePowerMenu(true);
+  sendPower(button, targets, targets.join(", "));
+};
+
+grid.addEventListener("click", (event) => {
+  const card = event.target.closest(".seat[data-node-id]");
+  if (!card || !event.ctrlKey || powerPanel.hidden) return;
+  event.preventDefault();
+  event.stopPropagation();
+  toggleSelection(card);
+  card.focus({ preventScroll: true });
+}, true);
+grid.addEventListener("contextmenu", (event) => {
+  const card = event.target.closest(".seat[data-node-id]");
+  if (!card || powerPanel.hidden) return;
+  event.preventDefault();
+  openPowerMenu(card, event.clientX, event.clientY);
+});
+grid.addEventListener("keydown", (event) => {
+  const card = event.target.closest(".seat[data-node-id]");
+  if (!card || powerPanel.hidden) return;
+  if (event.ctrlKey && event.code === "Space") {
+    event.preventDefault();
+    if (!event.repeat) toggleSelection(card);
+  } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+    event.preventDefault();
+    const { left, top } = card.getBoundingClientRect();
+    openPowerMenu(card, left, top);
+  }
+});
+powerMenu.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.stopPropagation();
+    closePowerMenu(true);
+  } else if (["ArrowDown", "ArrowUp"].includes(event.key) && !menuButtons[0].disabled) {
+    event.preventDefault();
+    menuButtons[document.activeElement === menuButtons[0] ? 1 : 0].focus();
+  }
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!powerMenu.contains(event.target)) closePowerMenu();
+});
+document.addEventListener("focusin", (event) => {
+  if (!powerMenu.contains(event.target)) closePowerMenu();
+});
+viewport.addEventListener("scroll", () => closePowerMenu());
+window.addEventListener("resize", () => closePowerMenu());
 
 function showChoices(open) {
   el("choices-panel").hidden = !open;
@@ -455,6 +559,7 @@ function renderGrid() {
   const key = "classctl.hiddenNodes." + state.room.roomId;
   if (key !== storageKey) {
     storageKey = key;
+    selectedNodes.clear();
     hidden = new Set();
     try {
       const saved = JSON.parse(localStorage.getItem(key));
@@ -466,6 +571,9 @@ function renderGrid() {
   );
   const computers = ordered.filter((seat) => seat.nodeId);
   const visible = computers.filter((seat) => !hidden.has(seat.nodeId));
+  const visibleIds = new Set(visible.map((seat) => seat.nodeId));
+  for (const id of selectedNodes) if (!visibleIds.has(id)) selectedNodes.delete(id);
+  if (menuTargets.some((id) => !visibleIds.has(id))) closePowerMenu();
   updateChoices(computers, visible);
   const seats = ordered.filter((seat) => !hidden.has(seat.nodeId));
   el("tab").hidden = !computers.length;
@@ -473,7 +581,6 @@ function renderGrid() {
   const emptyMessage = "Все компьютеры скрыты. Выберите нужные в панели «Компьютеры».";
   if (computers.length && !visible.length) el("notice").textContent = emptyMessage;
   else if (el("notice").textContent === emptyMessage) el("notice").textContent = "";
-  const grid = el("grid");
   grid.style.setProperty("--columns", Math.max(1, Math.ceil(Math.sqrt(seats.length))));
   grid.toggleAttribute("data-one-seat", seats.length === 1);
   const ids = new Set(seats.map((s) => s.seatId));
@@ -492,6 +599,11 @@ function renderGrid() {
       entry = createCard(seat, state.nodes[seat.nodeId], displayName, sig);
       cards.set(seat.seatId, entry);
     }
+    if (seat.nodeId) {
+      if (powerPanel.hidden) entry.card.removeAttribute("tabindex");
+      else entry.card.tabIndex = 0;
+      reflectSelection(entry.card);
+    }
     const next = previous ? previous.nextElementSibling : grid.firstElementChild;
     if (entry.card !== next) grid.insertBefore(entry.card, next);
     previous = entry.card;
@@ -505,6 +617,7 @@ function createCard(seat, binding, displayName, sig) {
     .join(" · ");
   card.className = "seat";
   if (seat.nodeId) {
+    card.dataset.nodeId = seat.nodeId;
     const caption = document.createElement("h2");
     const computer = document.createElement("span");
     caption.className = "caption";
