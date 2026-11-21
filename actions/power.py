@@ -26,17 +26,21 @@ CAPABILITIES = [
 
 schema = json.loads((CONTRACTS / "v1.schema.json").read_text())
 WIRE = Draft202012Validator(schema, format_checker=FormatChecker())
-PORTAL = Draft202012Validator(
-    json.loads((CONTRACTS / "power-v1.schema.json").read_text()),
-    registry=Registry().with_resource("urn:classctl:control:v1", Resource.from_contents(schema)),
+portal_schema = json.loads((CONTRACTS / "power-v1.schema.json").read_text())
+registry = Registry().with_resources([
+    ("urn:classctl:control:v1", Resource.from_contents(schema)),
+    ("urn:classctl:power:v1", Resource.from_contents(portal_schema)),
+])
+PORTAL = Draft202012Validator(portal_schema, registry=registry)
+PORTAL_GROUP = Draft202012Validator(
+    json.loads((CONTRACTS / "power-v2.schema.json").read_text()), registry=registry,
 )
 PARAMETERS = PORTAL.evolve(schema=PORTAL.schema["$defs"]["parameters"])
 
 
-def result(request_id, node_id, state, reason):
-    return dict(
-        version=1,
-        kind="action.result",
-        requestId=request_id,
-        outcomes=[dict(nodeId=node_id, state=state, reason=reason)],
-    )
+def outcome(node_id, state, reason):
+    return dict(nodeId=node_id, state=state, reason=reason)
+
+
+def result(request_id, outcomes):
+    return dict(version=1, kind="action.result", requestId=request_id, outcomes=outcomes)

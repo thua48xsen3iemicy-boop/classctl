@@ -65,16 +65,24 @@ def check_power():
     common = read(CONTRACTS / "v1.schema.json")
     schema = read(CONTRACTS / "power-v1.schema.json")
     Draft202012Validator.check_schema(schema)
-    portal = Draft202012Validator(schema, registry=Registry().with_resource(
-        "urn:classctl:control:v1", Resource.from_contents(common),
-    ))
+    registry = Registry().with_resources([
+        ("urn:classctl:control:v1", Resource.from_contents(common)),
+        ("urn:classctl:power:v1", Resource.from_contents(schema)),
+    ])
+    portal = Draft202012Validator(schema, registry=registry)
     portal.validate(read(CONTRACTS / "power/portal.json"))
     require(not portal.is_valid(read(CONTRACTS / "power/invalid-portal.json")),
             "Портал принял произвольные параметры выключения")
     parameters = portal.evolve(schema=schema["$defs"]["parameters"])
     parameters.validate(read(CONTRACTS / "examples/power-request.json")["parameters"])
     require(not parameters.is_valid({"force": True}), "Служба принимает параметры выключения")
-    print("Схема запроса питания: OK")
+    group_schema = read(CONTRACTS / "power-v2.schema.json")
+    Draft202012Validator.check_schema(group_schema)
+    group = Draft202012Validator(group_schema, registry=registry)
+    group.validate(read(CONTRACTS / "power/group.json"))
+    require(not group.is_valid(read(CONTRACTS / "power/invalid-group.json")),
+            "Портал принял повторяющуюся цель")
+    print("Схемы запросов питания v1 и v2: OK")
 
 
 def check_examples():

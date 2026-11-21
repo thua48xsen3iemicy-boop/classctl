@@ -103,6 +103,7 @@ def check_dense_grid(context, origin, status):
         nodes=nodes,
         iceServers=[],
         controlNodes=list(nodes),
+        powerNodes=list(nodes),
     )
     page.route("**/state", lambda route: route.fulfill(json=state))
     requests = []
@@ -148,7 +149,11 @@ def check_dense_grid(context, origin, status):
             "document.querySelector('#grid').offsetWidth === document.querySelector('#viewport').clientWidth"
         )
         monitor = status["session"]["monitors"][1]["monitorId"]
-        page.get_by_role("button", name="pc-25 · Экран 2", exact=True).click()
+        preview = page.get_by_role("button", name="pc-25 · Экран 2", exact=True)
+        preview.click(modifiers=["Control"])
+        assert page.locator('[data-node-id="pc-25"][data-selected]').count() == 1
+        assert not page.locator("#focus").is_visible()
+        preview.click()
         for _ in range(100):
             if any(m.get("request", {}).get("kind") == "access" for m in requests):
                 break

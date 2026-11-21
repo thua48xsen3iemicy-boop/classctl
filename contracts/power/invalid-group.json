@@ -1,0 +1,4 @@
+{
+  "actionId": "system.reboot",
+  "nodeIds": ["pc-01", "pc-01"]
+}
