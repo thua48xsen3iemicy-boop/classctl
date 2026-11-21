@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry, Resource
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
@@ -58,6 +59,22 @@ def check_session_identity():
             not validator.is_valid(dict(legacy, displayName=invalid_name)),
             "Принято неверное имя пользователя сессии",
         )
+
+
+def check_power():
+    common = read(CONTRACTS / "v1.schema.json")
+    schema = read(CONTRACTS / "power-v1.schema.json")
+    Draft202012Validator.check_schema(schema)
+    portal = Draft202012Validator(schema, registry=Registry().with_resource(
+        "urn:classctl:control:v1", Resource.from_contents(common),
+    ))
+    portal.validate(read(CONTRACTS / "power/portal.json"))
+    require(not portal.is_valid(read(CONTRACTS / "power/invalid-portal.json")),
+            "Портал принял произвольные параметры выключения")
+    parameters = portal.evolve(schema=schema["$defs"]["parameters"])
+    parameters.validate(read(CONTRACTS / "examples/power-request.json")["parameters"])
+    require(not parameters.is_valid({"force": True}), "Служба принимает параметры выключения")
+    print("Схема запроса питания: OK")
 
 
 def check_examples():
@@ -149,6 +166,7 @@ if __name__ == "__main__":
         check_preview(ROOT)
         check_input()
         check_session_identity()
+        check_power()
         check_links()
     except (ValueError, KeyError, OSError) as exc:
         sys.exit(f"Ошибка проверки: {exc}")

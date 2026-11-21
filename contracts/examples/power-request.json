@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "kind": "action.request",
+  "requestId": "power-42",
+  "actionId": "system.shutdown",
+  "nodeIds": ["pc-01"],
+  "issuedAt": "2026-11-21T09:00:00Z",
+  "expiresAt": "2026-11-21T09:00:10Z",
+  "parameters": {}
+}

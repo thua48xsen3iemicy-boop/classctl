@@ -1,0 +1,5 @@
+{
+  "actionId": "system.shutdown",
+  "nodeId": "pc-01",
+  "parameters": {"command": "poweroff"}
+}

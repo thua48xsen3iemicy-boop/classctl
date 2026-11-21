@@ -105,6 +105,39 @@ body {
 #sidebar-pin[aria-pressed="true"] {
   color: var(--accent);
 }
+#power {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+#power select,
+#power button {
+  width: 100%;
+  min-width: 0;
+  padding: 6px;
+  border-radius: 6px;
+}
+#power select {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font: inherit;
+}
+#sidebar #power button:disabled {
+  border-color: var(--border);
+  cursor: default;
+}
+#power :disabled {
+  opacity: 0.55;
+}
+#power-status {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+#power-status:empty {
+  display: none;
+}
 #viewport {
   grid-column: 2;
   overflow: auto;
