@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "classctl power v1 portal request",
+  "type": "object",
+  "properties": {
+    "actionId": { "enum": ["system.shutdown", "system.reboot"] },
+    "nodeId": { "$ref": "urn:classctl:control:v1#/$defs/id" }
+  },
+  "required": ["actionId", "nodeId"],
+  "additionalProperties": false,
+  "$defs": {
+    "parameters": { "type": "object", "maxProperties": 0 }
+  }
+}

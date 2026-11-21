@@ -20,3 +20,9 @@
 Для подписки на выход и передачи JPEG в T05 используйте [контракт preview.v1](preview/README.md).
 
 Возможность `session.identity.v1` позволяет координатору запросить метаданные активной сессии через `describe`. [Схема ответа](session-identity-v1.schema.json) допускает необязательное поле `displayName` с полным именем из GECOS. Поле `user` сохраняет прежнее значение для совместимости со старыми источниками. Портал использует `displayName` для подписи пользователя и `room.seats[].nodeId` для подписи компьютера.
+
+## Выключение и перезагрузка
+
+Портал передаёт `POST /power` с одним `nodeId` и `actionId` по [схеме power.v1](power-v1.schema.json). [Пример](power/portal.json) принимается, [запрос с параметрами](power/invalid-portal.json) отклоняется. `/state` возвращает `powerNodes` со списком доступных узлов или `null` при отсутствии права `system.power`. Старый координатор опускает это поле.
+
+Координатор создаёт [action.request](examples/power-request.json) с единственным целевым узлом и TTL 10 секунд. Системная служба принимает `system.shutdown` и `system.reboot` с пустым объектом `parameters` по схеме `system.power.empty.v1` из [power.v1](power-v1.schema.json). Она возвращает `action.result` с исходом для того же узла и `requestId`. Портал получает `action.result` и показывает исход. `succeeded` с причиной `handed-off` подтверждает приём команды подсистемой питания. При потере связи до ответа координатор возвращает `unknown`. Другие управляющие сообщения сохраняют форму и версию.

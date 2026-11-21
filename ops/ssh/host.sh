@@ -173,6 +173,7 @@ student)
     node=$2 url=$3
     "$release/.venv/bin/python" -c 'from PIL import features; import sys; sys.exit(0 if features.check_feature("xcb") else "Pillow requires XCB")'
     install -d -m 755 "$base/bin"
+    install -d -m 700 "$var/node"
     install -d -m 755 /etc/xdg/autostart
     session_desktop "$release" "$node" > /etc/xdg/autostart/classctl.desktop
     migrate_autostart
@@ -180,7 +181,7 @@ student)
 #!/bin/sh
 set -eu
 install -d -m 755 /run/classctl
-exec $release/.venv/bin/python $release/node/live.py --server $url --node $node --socket /run/classctl/seat0.sock --ca $etc/node/ca.pem --cert $etc/node/cert.pem --key $etc/node/key.pem
+exec $release/.venv/bin/python $release/node/live.py --server $url --node $node --socket /run/classctl/seat0.sock --ca $etc/node/ca.pem --cert $etc/node/cert.pem --key $etc/node/key.pem --power-db $var/node/power.sqlite
 EOF
     chmod 755 "$base/bin/node-start"
     service_install classctl-node root "$base/bin/node-start" ""

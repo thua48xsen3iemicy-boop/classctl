@@ -2,14 +2,21 @@
 
 import argparse
 import asyncio
+import json
 import os
-import subprocess
-from urllib.parse import urlsplit
 import socket
 import ssl
 import struct
+import subprocess
+import sys
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from aiohttp import ClientError, ClientSession, WSMsgType, web
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from actions.power import CAPABILITIES
+from node.power import Power
 
 
 async def forward(msg, dst):
@@ -76,6 +83,13 @@ async def main(args):
         raise ValueError("Test sessions require loopback and the current uid")
     tls = ssl.create_default_context(cafile=args.ca)
     tls.load_cert_chain(args.cert, args.key)
+    os.umask(0o077)
+    power = None
+    if args.power_db:
+        if args.test_session or os.geteuid() != 0:
+            raise ValueError("System power actions require a production node running as root")
+        power = Power(args.power_db, args.node)
+    power_actions = CAPABILITIES if power else []
     upstream = None
     local = None
     local_peer = None
@@ -92,6 +106,11 @@ async def main(args):
                 preview=dict(state="pending", lastFrameAt=None, lastVerifiedAt=None),
             )
         )
+        if power:
+            await ws.send_json(
+                dict(version=1, kind="capabilities", nodeId=args.node,
+                     features=[], actions=power_actions)
+            )
 
     async def session(request):
         nonlocal local, local_peer
@@ -118,6 +137,19 @@ async def main(args):
             async for msg in ws:
                 if upstream is None:
                     break
+                if msg.type == WSMsgType.TEXT:
+                    try:
+                        data = msg.json()
+                    except json.JSONDecodeError:
+                        break
+                    if not isinstance(data, dict):
+                        break
+                    if data.get("kind") in ("action.request", "action.result"):
+                        continue
+                    if data.get("kind") == "capabilities":
+                        data["actions"] = power_actions
+                        await upstream.send_json(data)
+                        continue
                 await forward(msg, upstream)
         finally:
             try:
@@ -153,6 +185,16 @@ async def main(args):
                         check = asyncio.create_task(monitor(ws))
                         try:
                             async for msg in ws:
+                                if msg.type == WSMsgType.TEXT:
+                                    data = msg.json()
+                                    if data.get("kind") == "action.request":
+                                        if power:
+                                            response = await asyncio.to_thread(
+                                                power.handle, data
+                                            )
+                                            if response and not ws.closed:
+                                                await ws.send_json(response)
+                                        continue
                                 if local is not None and not local.closed:
                                     await forward(msg, local)
                         finally:
@@ -172,7 +214,6 @@ async def main(args):
     app.router.add_get("/session", session)
     runner = web.AppRunner(app)
     await runner.setup()
-    os.umask(0o077)
     await web.UnixSite(runner, args.socket).start()
     if args.uid is None:
         # The parent directory is owned by the service. The handler authenticates
@@ -192,6 +233,7 @@ if __name__ == "__main__":
     for name in ("socket", "cert", "key", "ca", "server"):
         p.add_argument("--" + name, required=True)
     p.add_argument("--node", required=True)
+    p.add_argument("--power-db", help="Enable system power actions with this persistent SQLite journal")
     p.add_argument("--test-session", action="store_true")
     p.add_argument("--uid", type=int, help="Restrict to one UID (required with --test-session)")
     asyncio.run(main(p.parse_args()))

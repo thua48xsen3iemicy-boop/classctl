@@ -98,8 +98,11 @@ def validate(cfg):
             raise ValueError(f"Invalid {key}")
     if cfg["port"] == cfg["ui_port"]:
         raise ValueError("Agent and UI ports must differ")
-    if sorted(cfg["rights"]) not in (["view"], ["control", "view"]):
-        raise ValueError("Room rights must be view or view + control")
+    rights = cfg["rights"]
+    if (not isinstance(rights, list) or "view" not in rights
+            or any(right not in ("view", "control", "system.power") for right in rights)
+            or len(rights) != len(set(rights))):
+        raise ValueError("Room rights require view and optionally control and system.power")
     if not cfg["students"]:
         raise ValueError("Student nodes are required")
     nodes = set()

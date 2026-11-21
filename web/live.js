@@ -373,6 +373,68 @@ document.addEventListener("pointerdown", (event) => {
   if (!sidebarPinned && !sidebar.contains(event.target)) showSidebar(false);
 });
 
+const powerNode = el("power-node");
+const powerStatus = el("power-status");
+const powerButtons = [el("shutdown"), el("reboot")];
+const powerMessages = {
+  "handed-off": "Команда передана системе",
+  offline: "Компьютер вне сети",
+  unsupported: "Действие недоступно на этом компьютере",
+  busy: "Предыдущая команда ещё действует",
+  expired: "Срок команды истёк",
+  "invalid-clock": "Проверьте время на компьютере",
+  "system-error": "Система отклонила команду",
+  unconfirmed: "Выполнение команды не подтверждено",
+};
+let powerOptions, powerPending = false;
+
+function renderPower() {
+  const nodes = state?.powerNodes;
+  const available = Array.isArray(nodes);
+  el("power").hidden = !available;
+  if (!available) return;
+  const next = JSON.stringify(nodes);
+  if (powerOptions !== next) {
+    const selected = powerNode.value;
+    const prompt = nodes.length ? "Выберите компьютер" : "Нет доступных компьютеров";
+    powerNode.replaceChildren(new Option(prompt, ""), ...nodes.map((id) => new Option(id, id)));
+    powerNode.value = nodes.includes(selected) ? selected : "";
+    powerOptions = next;
+  }
+  powerNode.disabled = powerPending || !nodes.length;
+  for (const button of powerButtons) button.disabled = powerPending || !powerNode.value;
+}
+
+async function sendPower(button) {
+  const nodeId = powerNode.value;
+  if (powerPending || !state?.powerNodes?.includes(nodeId)) return;
+  if (!window.confirm(`${button.textContent} ${nodeId}? Несохранённые данные могут быть потеряны.`)) return;
+  powerPending = true;
+  powerStatus.textContent = `${nodeId} · Отправка команды…`;
+  renderPower();
+  try {
+    const response = await fetch("/power", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actionId: "system." + button.id, nodeId }),
+    });
+    if (response.status === 403) {
+      powerStatus.textContent = `${nodeId} · Недостаточно прав`;
+      return;
+    }
+    if (!response.ok) throw Error();
+    const { outcomes } = await response.json();
+    powerStatus.textContent = `${nodeId} · ${powerMessages[outcomes[0].reason] || "Действие отклонено"}`;
+  } catch {
+    powerStatus.textContent = `${nodeId} · Выполнение команды не подтверждено`;
+  } finally {
+    powerPending = false;
+    renderPower();
+  }
+}
+powerNode.onchange = renderPower;
+for (const button of powerButtons) button.onclick = () => sendPower(button);
+
 function showChoices(open) {
   el("choices-panel").hidden = !open;
   el("tab").setAttribute("aria-expanded", String(open));
@@ -517,6 +579,7 @@ async function poll() {
     if (!response.ok) throw Error();
     const initial = !state;
     state = await response.json();
+    renderPower();
     document.title = state.room.roomId + " · classctl";
     el("room-name").textContent = state.room.roomId;
     if (initial) el("notice").textContent = "";
@@ -526,6 +589,7 @@ async function poll() {
     } else renderGrid();
   } catch {
     state = null;
+    renderPower();
     showChoices(false);
     el("tab").hidden = true;
     closeFocus();
