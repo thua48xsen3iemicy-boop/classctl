@@ -134,20 +134,53 @@ def check_dense_grid(context, origin, status):
                           el.offsetHeight, getComputedStyle(el).fontSize]"""
             )
 
+        def zoom_by_wheel(delta, steps=1):
+            page.mouse.move(200, 200)
+            page.keyboard.down("Control")
+            for _ in range(steps):
+                page.mouse.wheel(0, delta)
+            page.keyboard.up("Control")
+
         before = dimensions()
-        page.keyboard.down("Control")
-        page.mouse.move(200, 200)
-        page.mouse.wheel(0, -120)
-        page.keyboard.up("Control")
+        zoom_by_wheel(-120)
         page.wait_for_function(
-            "document.querySelector('#grid').offsetWidth > document.querySelector('#viewport').clientWidth"
+            """() => {
+                const cards = document.querySelectorAll('#grid .seat');
+                return cards[4].getBoundingClientRect().top > cards[0].getBoundingClientRect().top;
+            }"""
         )
         after = dimensions()
         assert after[0] > before[0] and after[1:] == before[1:]
-        page.keyboard.press("Control+0")
+        assert page.evaluate("""() => {
+            const viewport = document.querySelector('#viewport');
+            return viewport.scrollWidth === viewport.clientWidth;
+        }""")
+
+        zoom_by_wheel(-120, steps=12)
         page.wait_for_function(
-            "document.querySelector('#grid').offsetWidth === document.querySelector('#viewport').clientWidth"
+            "getComputedStyle(document.querySelector('#grid')).gridTemplateColumns.split(' ').length === 1"
         )
+        assert page.evaluate("""() => {
+            const viewport = document.querySelector('#viewport');
+            return viewport.scrollWidth === viewport.clientWidth
+                && viewport.scrollHeight > viewport.clientHeight;
+        }""")
+
+        page.keyboard.press("Control+0")
+        assert dimensions() == before
+        assert page.locator("#viewport").evaluate("viewport => viewport.scrollTop") == 0
+
+        page.set_viewport_size(dict(width=320, height=768))
+        zoom_by_wheel(120, steps=7)
+        page.wait_for_function(
+            "getComputedStyle(document.querySelector('#grid')).gridTemplateColumns.split(' ').length === 2"
+        )
+        assert page.locator("#viewport").evaluate("el => el.scrollWidth === el.clientWidth")
+        assert page.locator(".seat").evaluate_all(
+            "cards => cards.every(card => card.querySelector('.outputs').offsetWidth === card.offsetWidth)"
+        )
+        page.set_viewport_size(dict(width=1920, height=1080))
+        page.keyboard.press("Control+0")
         monitor = status["session"]["monitors"][1]["monitorId"]
         preview = page.get_by_role("button", name="pc-25 · Экран 2", exact=True)
         preview.click(modifiers=["Control"])
@@ -227,7 +260,7 @@ def check_dense_grid(context, origin, status):
             "document.querySelector('.monitor') && document.querySelector('#focus').hidden"
         )
         print(
-            "Layout fixture: 25 seats, 50 monitor cards, no scrolling; correct target and full-page video"
+            "Layout fixture: 25 seats, 50 previews, zoom wraps within the viewport, correct monitor target"
         )
     finally:
         page.close()
@@ -542,6 +575,10 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
         page.get_by_role("heading", name=f"pc-01 · {name}" if name else "pc-01", exact=True).wait_for()
 
     check_caption("Анна Иванова")
+    thumbnail = page.get_by_role("button", name="pc-01 · Экран 1", exact=True)
+    thumbnail.hover()
+    page.wait_for_function("""() => document.querySelector('.monitor').title.endsWith(' · Экран 1')""")
+    assert thumbnail.evaluate("button => [...button.children].map(child => child.tagName)") == ["CANVAS"]
     status = page.evaluate("async()=>(await (await fetch('/state')).json()).nodes['pc-01']")
     check_overview_grid(ctx, origin, status)
     check_dense_grid(ctx, origin, status)

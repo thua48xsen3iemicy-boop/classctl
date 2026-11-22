@@ -5,6 +5,7 @@ const el = (id) => document.getElementById(id);
 let state, focus;
 const cards = new Map();
 const viewport = el("viewport");
+const grid = el("grid");
 let zoom = 1;
 viewport.addEventListener(
   "wheel",
@@ -22,17 +23,20 @@ viewport.addEventListener(
       4,
       Math.max(
         0.5,
-        zoom * Math.exp(-Math.max(-120, Math.min(120, delta)) * 0.002),
+        zoom * Math.exp(-Math.max(-120, Math.min(120, delta)) * 0.001),
       ),
     );
-    const x = event.clientX - viewport.getBoundingClientRect().left;
-    const y = event.clientY - viewport.getBoundingClientRect().top;
-    const ratio = next / zoom;
-    const left = (viewport.scrollLeft + x) * ratio - x,
-      top = (viewport.scrollTop + y) * ratio - y;
+    if (next === zoom) return;
+    const card = event.target.closest(".seat");
+    const before = card?.getBoundingClientRect();
     zoom = next;
-    el("grid").style.setProperty("--scale", zoom);
-    viewport.scrollTo(left, top);
+    grid.style.setProperty("--scale", zoom);
+    if (before) {
+      // Keep the card at the same vertical position under the pointer after reflow.
+      const position = (event.clientY - before.top) / before.height;
+      const after = card.getBoundingClientRect();
+      viewport.scrollTop += after.top + position * after.height - event.clientY;
+    }
   },
   { passive: false },
 );
@@ -40,8 +44,8 @@ document.addEventListener("keydown", (event) => {
   if (!focus && event.ctrlKey && event.key === "0") {
     event.preventDefault();
     zoom = 1;
-    el("grid").style.removeProperty("--scale");
-    viewport.scrollTo(0, 0);
+    grid.style.removeProperty("--scale");
+    viewport.scrollTop = 0;
   }
 });
 const socket = (control = false) =>
@@ -52,7 +56,7 @@ const socket = (control = false) =>
 function clearGrid() {
   for (const card of cards.values()) card.stop();
   cards.clear();
-  el("grid").replaceChildren();
+  grid.replaceChildren();
 }
 function closeConnection(connection) {
   connection.cleanup?.();
@@ -70,12 +74,12 @@ function closeFocus() {
   if (current.connection) closeConnection(current.connection);
   el("focus").hidden = true;
   el("overview").hidden = false;
-  return current.scroll;
+  return current.scrollTop;
 }
 function back() {
-  const scroll = closeFocus();
+  const scrollTop = closeFocus();
   if (state) renderGrid();
-  if (scroll) viewport.scrollTo(...scroll);
+  if (scrollTop !== undefined) viewport.scrollTop = scrollTop;
 }
 el("back").onclick = back;
 function setDrawer(open) {
@@ -131,7 +135,7 @@ function signature(seat) {
 function openView(seat, id) {
   const view = {
     seat, signature: signature(seat),
-    scroll: [viewport.scrollLeft, viewport.scrollTop],
+    scrollTop: viewport.scrollTop,
   };
   closePowerMenu();
   showChoices(false);
@@ -251,19 +255,19 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
     monitorId: m.monitorId,
   };
   const panel = document.createElement("button"),
-    canvas = document.createElement("canvas"),
-    label = document.createElement("span");
+    canvas = document.createElement("canvas");
   canvas.width = 1;
   canvas.height = 1;
-  label.className = "signal";
-  function signal(text) {
-    label.textContent = text;
-    label.dataset.quiet = String(text === "в эфире" || text === "статично");
-    panel.setAttribute("aria-description", identity + " · " + text);
-    panel.title = identity + " · " + name + " · " + text;
+  let previewIssue;
+  function setPreviewIssue(text = "") {
+    if (text === previewIssue) return;
+    previewIssue = text;
+    const suffix = text ? " · " + text : "";
+    panel.setAttribute("aria-description", identity + suffix);
+    panel.title = identity + " · " + name + suffix;
   }
-  signal("ожидание");
-  panel.append(canvas, label);
+  setPreviewIssue("ожидание");
+  panel.append(canvas);
   panel.className = "monitor";
   panel.type = "button";
   panel.setAttribute("aria-label", seat.nodeId + " · " + name);
@@ -279,7 +283,7 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
       canvas.height = image.height;
       canvas.getContext("2d").drawImage(image, 0, 0);
       verified = performance.now();
-      signal("в эфире");
+      setPreviewIssue();
     },
     clear: () => {
       canvas.width = 1;
@@ -296,7 +300,7 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
         const msg = JSON.parse(data);
         if (receiver.accept(msg) && msg.kind === "preview.verified") {
           verified = performance.now();
-          signal("статично");
+          setPreviewIssue();
         }
       } else {
         const n = new DataView(data).getUint32(0);
@@ -311,12 +315,12 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
     }
   };
   const timer = setInterval(() => {
-    if (verified && performance.now() - verified > 2000) signal("кадр устарел");
+    if (verified && performance.now() - verified > 2000) setPreviewIssue("кадр устарел");
   }, 500);
   ws.onclose = () => {
     receiver.reset();
     clearInterval(timer);
-    signal("нет связи");
+    setPreviewIssue("нет связи");
     if (!cancelled) onDisconnect();
   };
   return () => {
@@ -374,7 +378,6 @@ document.addEventListener("pointerdown", (event) => {
   if (!sidebarPinned && !sidebar.contains(event.target)) showSidebar(false);
 });
 
-const grid = el("grid");
 const powerPanel = el("power");
 const powerMenu = el("power-menu");
 const powerStatus = el("power-status");
