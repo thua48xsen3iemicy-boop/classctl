@@ -12,8 +12,10 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from contextlib import ExitStack
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from aiohttp import (
@@ -32,6 +34,78 @@ def port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def check_nextcloud_embedding(browser, tmp, origin, grid):
+    class ParentPage(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path != "/":
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Security-Policy", "frame-src * blob:")
+            self.end_headers()
+            self.wfile.write(f'<iframe src="{origin}/" allowfullscreen></iframe>'.encode())
+
+        def log_message(self, format, *args):
+            pass
+
+    policy_path = tmp / "policy"
+    original = policy_path.read_text()
+    policy = json.loads(original)
+
+    def set_origin(value):
+        policy["nextcloud_origin"] = value
+        staged = tmp / "policy.next"
+        staged.write_text(json.dumps(policy))
+        staged.replace(policy_path)
+
+    with ExitStack() as stack:
+        stack.callback(policy_path.write_text, original)
+        parent = stack.enter_context(HTTPServer(("127.0.0.1", 0), ParentPage))
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls.load_cert_chain(tmp / "localhost.pem", tmp / "localhost.key")
+        parent.socket = tls.wrap_socket(parent.socket, server_side=True)
+        thread = threading.Thread(target=parent.serve_forever, daemon=True)
+        thread.start()
+        stack.callback(thread.join)
+        stack.callback(parent.shutdown)
+        parent_port = parent.server_port
+        allowed = f"https://localhost:{parent_port}"
+        other = f"https://127.0.0.1:{parent_port}"
+        context = browser.new_context(ignore_https_errors=True)
+        stack.callback(context.close)
+        page = context.new_page()
+
+        def blocked(url, ancestors):
+            with page.expect_console_message(
+                lambda message: "frame-ancestors" in message.text
+            ):
+                page.goto(url)
+            assert page.request.get(origin).headers["content-security-policy"] == ancestors
+            assert page.frame(url=origin + "/") is None
+
+        blocked(allowed, "frame-ancestors 'none'")
+        set_origin(allowed + "; frame-ancestors *")
+        blocked(allowed, "frame-ancestors 'none'")
+        set_origin(allowed)
+        blocked(other, f"frame-ancestors {allowed}")
+
+        messages = []
+        page.on("console", lambda message: messages.append(message.text))
+        page.goto(allowed)
+        frame = page.frame(url=origin + "/")
+        assert frame is not None, messages
+        frame.wait_for_function(grid)
+        frame.get_by_role("button", name="pc-01 · Экран 1", exact=True).click()
+        page.wait_for_function("document.fullscreenElement === document.querySelector('iframe')")
+        frame.wait_for_function("document.fullscreenElement === document.querySelector('#focus')")
+        frame.wait_for_function("document.querySelector('video')?.readyState >= 2")
+
+        set_origin(None)
+        blocked(allowed, "frame-ancestors 'none'")
+    print("T17: HTTPS parent embeds loopback HTTP, receives previews and opens fullscreen video; other origins blocked")
 
 
 async def check_listeners(tmp, origin, agent_origin, contexts):
@@ -651,6 +725,7 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     status = page.evaluate("async()=>(await (await fetch('/state')).json()).nodes['pc-01']")
     check_overview_grid(ctx, origin, status)
     check_dense_grid(ctx, origin, status)
+    check_nextcloud_embedding(browser, tmp, origin, grid)
     first, second = monitors
     page.wait_for_function(grid)
     page.evaluate("""() => {

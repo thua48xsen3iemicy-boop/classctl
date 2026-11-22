@@ -11,11 +11,14 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
+sys.path.insert(0, str(ROOT))
+from ops.ssh.nextcloud import nextcloud_origin
 
 
 def run(*args, data=None, stdin=None):
@@ -83,6 +86,7 @@ def validate_pip_url(field, value):
 
 
 def validate(cfg):
+    nextcloud_origin(cfg.get("nextcloud_origin"))
     for field in ("pip_proxy", "pip_index_url"):
         validate_pip_url(field, cfg.get(field))
     name = r"[A-Za-z0-9][A-Za-z0-9._-]*"
@@ -181,6 +185,9 @@ def deploy(cfg, state, tmp, only_nodes):
     server, dns, port = cfg["coordinator"], cfg["dns"], cfg["port"]
     students = [s for s in cfg["students"] if not only_nodes or s["node"] in only_nodes]
     policy = {"teachers": {"local": {"rooms": {cfg["room"]: cfg["rights"]}}}, "nodes": {}}
+    origin = nextcloud_origin(cfg.get("nextcloud_origin"))
+    if origin is not None:
+        policy["nextcloud_origin"] = origin
     if only_nodes:
         unchanged = {s["node"] for s in cfg["students"]} - only_nodes
         policy["nodes"] = existing_node_policy(server, state, unchanged)
@@ -233,7 +240,10 @@ def main():
                         help="deploy to the coordinator and this student node (repeatable)")
     args = parser.parse_args()
     cfg = json.loads(args.inventory.read_text())
-    validate(cfg)
+    try:
+        validate(cfg)
+    except ValueError as error:
+        parser.error(str(error))
     only_nodes = set(args.only_node)
     unknown = only_nodes.difference(s["node"] for s in cfg["students"])
     if unknown:

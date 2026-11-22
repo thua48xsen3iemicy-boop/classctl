@@ -21,6 +21,7 @@ from secure import AccessPolicy, CONTRACTS, Node, PREVIEW, inventory, validate
 ROOT = CONTRACTS.parent
 sys.path.insert(0, str(ROOT))
 from actions import power
+from ops.ssh.nextcloud import nextcloud_origin
 
 UI_HOST = "127.0.0.1"
 LOCAL_SUBJECT = "local"
@@ -451,12 +452,21 @@ def ui_app(relay):
         ]
     )
 
-    def serve(path):
+    def serve(path, page=False):
         async def file(request):
-            relay.require_view()
-            return web.FileResponse(
-                path, headers={"Content-Security-Policy": "frame-ancestors 'none'"}
-            )
+            policy = relay.policy()
+            relay.require_view(policy)
+            ancestor = None
+            if page:
+                try:
+                    ancestor = nextcloud_origin(policy.get("nextcloud_origin"))
+                except ValueError:
+                    pass
+            ancestors = ancestor or "'none'"
+            headers = {"Content-Security-Policy": f"frame-ancestors {ancestors}"}
+            if page:
+                headers["Cache-Control"] = "no-store"
+            return web.FileResponse(path, headers=headers)
 
         return file
 
@@ -469,7 +479,7 @@ def ui_app(relay):
         "/live.css": "web/live.css",
         "/receiver.mjs": "contracts/preview/receiver.mjs",
     }.items():
-        app.router.add_get(url, serve(ROOT / path))
+        app.router.add_get(url, serve(ROOT / path, page=url == "/"))
     return app
 
 
