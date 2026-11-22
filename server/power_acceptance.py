@@ -51,9 +51,19 @@ async def check_ui(origin):
         page = await browser.new_page()
         await page.clock.install()
         await page.goto(origin)
+        rail = page.locator("#overview-rail")
+        await expect(rail.locator("#rail-room-name")).to_have_text("lab-a")
+        await expect(rail.get_by_role("button", name="Выключить все", exact=True)).to_be_enabled()
+        await expect(rail.get_by_role("button", name="Перезагрузить все", exact=True)).to_be_enabled()
+        assert await rail.evaluate("""rail => {
+            const handle = document.querySelector('#sidebar-handle');
+            const viewport = document.querySelector('#viewport');
+            return rail.offsetWidth === handle.offsetWidth && viewport.offsetLeft === rail.offsetWidth;
+        }""")
         await page.locator("#sidebar-handle").focus()
         await page.keyboard.press("Enter")
         await page.locator("#sidebar-pin").click()
+        await expect(rail).to_be_hidden()
         sidebar = page.locator("#power")
         await expect(page.locator("#sidebar-panel button:not(#sidebar-pin)")).to_have_text([
             "Компьютеры", "Выключить все", "Перезагрузить все",
@@ -83,6 +93,7 @@ async def check_ui(origin):
         await expect(page.locator(".seat[data-selected]")).to_have_count(1)
         await first.press("Shift+F10")
         await expect(menu).to_have_accessible_name("pc-01")
+        await expect(menu.locator(".power-icon:visible")).to_have_count(2)
         await page.keyboard.press("Escape")
         await expect(menu).to_be_hidden()
         await expect(first).to_be_focused()
@@ -135,8 +146,11 @@ async def check_ui(origin):
         await page.get_by_role("checkbox", name="pc-02").uncheck()
         await expect(second).to_have_count(0)
         await expect(page.locator(".seat[data-selected]")).to_have_count(1)
+        await page.locator("#sidebar-pin").click()
+        await page.mouse.click(900, 700)
+        await expect(rail).to_be_visible()
         page.once("dialog", accept)
-        await sidebar.get_by_role("button", name="Перезагрузить все", exact=True).click()
+        await rail.get_by_role("button", name="Перезагрузить все", exact=True).click()
         await expect(status).to_have_text("Команда передана системе: 2 из 2")
         await page.clock.fast_forward(5000)
         await expect(status).to_be_hidden()

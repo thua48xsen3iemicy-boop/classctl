@@ -22,16 +22,23 @@
             <div id="choices"></div>
           </section>
           <section id="power" aria-label="Питание компьютеров аудитории" hidden>
-            <button type="button" data-action="system.shutdown" disabled>Выключить все</button>
-            <button type="button" data-action="system.reboot" disabled>Перезагрузить все</button>
+            <button type="button" data-action="system.shutdown" disabled><span class="power-icon" aria-hidden="true"></span>Выключить все</button>
+            <button type="button" data-action="system.reboot" disabled><span class="power-icon" aria-hidden="true"></span>Перезагрузить все</button>
           </section>
         </div>
       </aside>
+      <div id="overview-rail">
+        <span id="rail-room-name"></span>
+        <div id="rail-power" role="group" aria-label="Питание компьютеров аудитории" hidden>
+          <button type="button" data-action="system.shutdown" aria-label="Выключить все" title="Выключить все" disabled><span class="power-icon" aria-hidden="true"></span></button>
+          <button type="button" data-action="system.reboot" aria-label="Перезагрузить все" title="Перезагрузить все" disabled><span class="power-icon" aria-hidden="true"></span></button>
+        </div>
+      </div>
       <div id="viewport"><main id="grid" aria-label="Рабочие места"></main></div>
       <div id="power-menu" role="menu" aria-labelledby="power-menu-label" tabindex="-1" hidden>
         <strong id="power-menu-label" role="presentation"></strong>
-        <button type="button" role="menuitem" tabindex="-1" data-action="system.shutdown">Выключить</button>
-        <button type="button" role="menuitem" tabindex="-1" data-action="system.reboot">Перезагрузить</button>
+        <button type="button" role="menuitem" tabindex="-1" data-action="system.shutdown"><span class="power-icon" aria-hidden="true"></span>Выключить</button>
+        <button type="button" role="menuitem" tabindex="-1" data-action="system.reboot"><span class="power-icon" aria-hidden="true"></span>Перезагрузить</button>
       </div>
       <p id="power-status" role="status"></p>
     </div>
