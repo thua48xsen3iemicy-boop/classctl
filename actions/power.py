@@ -27,13 +27,16 @@ CAPABILITIES = [
 schema = json.loads((CONTRACTS / "v1.schema.json").read_text())
 WIRE = Draft202012Validator(schema, format_checker=FormatChecker())
 portal_schema = json.loads((CONTRACTS / "power-v1.schema.json").read_text())
+group_schema = json.loads((CONTRACTS / "power-v2.schema.json").read_text())
 registry = Registry().with_resources([
     ("urn:classctl:control:v1", Resource.from_contents(schema)),
     ("urn:classctl:power:v1", Resource.from_contents(portal_schema)),
+    ("urn:classctl:power:v2", Resource.from_contents(group_schema)),
 ])
 PORTAL = Draft202012Validator(portal_schema, registry=registry)
-PORTAL_GROUP = Draft202012Validator(
-    json.loads((CONTRACTS / "power-v2.schema.json").read_text()), registry=registry,
+PORTAL_GROUP = Draft202012Validator(group_schema, registry=registry)
+PORTAL_WITHOUT_SESSION = Draft202012Validator(
+    json.loads((CONTRACTS / "power-v3.schema.json").read_text()), registry=registry,
 )
 PARAMETERS = PORTAL.evolve(schema=PORTAL.schema["$defs"]["parameters"])
 

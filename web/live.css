@@ -270,6 +270,18 @@ body {
   border-radius: 1px;
   background: currentColor;
 }
+[data-require-no-session] .power-icon::before {
+  inset: 1px 0 3px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+[data-require-no-session] .power-icon::after {
+  top: auto;
+  bottom: 0;
+  left: 4px;
+  width: 6px;
+  height: 1.5px;
+}
 [data-action="system.reboot"] .power-icon::before {
   inset: 1px 1px 1px 0;
   border: 1.5px solid currentColor;

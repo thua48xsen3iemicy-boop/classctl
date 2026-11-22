@@ -64,10 +64,13 @@ def check_session_identity():
 def check_power():
     common = read(CONTRACTS / "v1.schema.json")
     schema = read(CONTRACTS / "power-v1.schema.json")
+    group_schema = read(CONTRACTS / "power-v2.schema.json")
     Draft202012Validator.check_schema(schema)
+    Draft202012Validator.check_schema(group_schema)
     registry = Registry().with_resources([
         ("urn:classctl:control:v1", Resource.from_contents(common)),
         ("urn:classctl:power:v1", Resource.from_contents(schema)),
+        ("urn:classctl:power:v2", Resource.from_contents(group_schema)),
     ])
     portal = Draft202012Validator(schema, registry=registry)
     portal.validate(read(CONTRACTS / "power/portal.json"))
@@ -76,13 +79,23 @@ def check_power():
     parameters = portal.evolve(schema=schema["$defs"]["parameters"])
     parameters.validate(read(CONTRACTS / "examples/power-request.json")["parameters"])
     require(not parameters.is_valid({"force": True}), "Служба принимает параметры выключения")
-    group_schema = read(CONTRACTS / "power-v2.schema.json")
-    Draft202012Validator.check_schema(group_schema)
     group = Draft202012Validator(group_schema, registry=registry)
     group.validate(read(CONTRACTS / "power/group.json"))
     require(not group.is_valid(read(CONTRACTS / "power/invalid-group.json")),
             "Портал принял повторяющуюся цель")
-    print("Схемы запросов питания v1 и v2: OK")
+    conditional_schema = read(CONTRACTS / "power-v3.schema.json")
+    Draft202012Validator.check_schema(conditional_schema)
+    conditional = Draft202012Validator(conditional_schema, registry=registry)
+    shutdown = read(CONTRACTS / "power/shutdown-without-session.json")
+    conditional.validate(shutdown)
+    require(not group.is_valid(shutdown), "Запрос с условием принят как безусловный")
+    for invalid in (
+        read(CONTRACTS / "power/invalid-reboot-without-session.json"),
+        dict(shutdown, requireNoSession=False),
+        dict(shutdown, nodeIds=["pc-01", "pc-01"]),
+    ):
+        require(not conditional.is_valid(invalid), "Принят неверный запрос условного выключения")
+    print("Схемы запросов питания v1, v2 и v3: OK")
 
 
 def check_examples():

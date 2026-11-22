@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "classctl power v3 portal request",
+  "type": "object",
+  "properties": {
+    "actionId": { "const": "system.shutdown" },
+    "nodeIds": { "$ref": "urn:classctl:power:v2#/properties/nodeIds" },
+    "requireNoSession": { "const": true }
+  },
+  "required": ["actionId", "nodeIds", "requireNoSession"],
+  "additionalProperties": false
+}

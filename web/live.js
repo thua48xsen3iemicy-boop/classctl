@@ -424,6 +424,7 @@ const powerMessages = {
   "handed-off": "Команда передана системе",
   offline: "Компьютер вне сети",
   unsupported: "Действие недоступно на этом компьютере",
+  "session-active": "Есть графическая сессия",
   busy: "Предыдущая команда ещё действует",
   expired: "Срок команды истёк",
   "invalid-clock": "Проверьте время на компьютере",
@@ -431,6 +432,15 @@ const powerMessages = {
   unconfirmed: "Выполнение команды не подтверждено",
 };
 let powerPending = false, powerStatusTimer, menuTargets = [], menuTrigger;
+
+function powerTargets(button) {
+  const nodes = state?.powerNodes ?? [];
+  if (!button.hasAttribute("data-require-no-session")) return nodes;
+  return nodes.filter((id) => {
+    const node = state.nodes[id];
+    return node?.availability === "online" && node.session === null;
+  });
+}
 
 function renderPower() {
   const nodes = state?.powerNodes;
@@ -441,7 +451,7 @@ function renderPower() {
     selectedNodes.clear();
     closePowerMenu();
   }
-  for (const button of powerButtons) button.disabled = powerPending || !nodes?.length;
+  for (const button of powerButtons) button.disabled = powerPending || !powerTargets(button).length;
   const menuDisabled = powerPending || !menuTargets.some((id) => nodes?.includes(id));
   for (const button of menuButtons) button.disabled = menuDisabled;
 }
@@ -467,6 +477,8 @@ async function sendPower(button, nodeIds, scope) {
   if (powerPending || !nodeIds.some((id) => state?.powerNodes?.includes(id))) return;
   const label = button.getAttribute("aria-label") ?? button.textContent.trim();
   if (!window.confirm(`${label} ${scope}? Несохранённые данные могут быть потеряны.`)) return;
+  const command = { actionId: button.dataset.action, nodeIds };
+  if (button.hasAttribute("data-require-no-session")) command.requireNoSession = true;
   clearTimeout(powerStatusTimer);
   powerPending = true;
   powerStatus.textContent = "Отправка команды…";
@@ -475,7 +487,7 @@ async function sendPower(button, nodeIds, scope) {
     const response = await fetch("/power", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actionId: button.dataset.action, nodeIds }),
+      body: JSON.stringify(command),
     });
     if (response.status === 403) {
       powerStatus.textContent = "Недостаточно прав";
@@ -496,8 +508,10 @@ async function sendPower(button, nodeIds, scope) {
 }
 
 for (const button of powerButtons) button.onclick = () => {
-  const nodeIds = [...(state?.powerNodes ?? [])];
-  sendPower(button, nodeIds, `компьютеры аудитории (${nodeIds.length} доступно)`);
+  const nodeIds = powerTargets(button);
+  const count = `(${nodeIds.length} доступно)`;
+  const scope = button.hasAttribute("data-require-no-session") ? count : `компьютеры аудитории ${count}`;
+  sendPower(button, nodeIds, scope);
 };
 
 function reflectSelection(card) {

@@ -128,7 +128,8 @@ class Relay(AccessPolicy):
             command = await request.json()
         except ValueError:
             raise web.HTTPBadRequest() from None
-        if power.PORTAL_GROUP.is_valid(command):
+        require_no_session = power.PORTAL_WITHOUT_SESSION.is_valid(command)
+        if require_no_session or power.PORTAL_GROUP.is_valid(command):
             targets = command["nodeIds"]
         elif power.PORTAL.is_valid(command):
             targets = [command["nodeId"]]
@@ -148,16 +149,19 @@ class Relay(AccessPolicy):
             expiresAt=(issued + timedelta(seconds=power.TTL)).isoformat(), parameters={},
         )
         outcomes = await asyncio.gather(*(
-            self.dispatch_power(policy, node_id, operation) for node_id in targets
+            self.dispatch_power(policy, node_id, operation, require_no_session)
+            for node_id in targets
         ))
         return web.json_response(
             power.result(request_id, outcomes), headers={"Cache-Control": "no-store"}
         )
 
-    async def dispatch_power(self, policy, node_id, operation):
+    async def dispatch_power(self, policy, node_id, operation, require_no_session):
         request_id = operation["requestId"]
         target = dict(actionId=operation["actionId"], nodeId=node_id, requestId=request_id)
         rejection = self.power_rejection(policy, node_id)
+        if not rejection and require_no_session and self.nodes[node_id].status["session"] is not None:
+            rejection = "session-active"
         if rejection or node_id in self.power_requests:
             outcome = power.outcome(node_id, "rejected", rejection or "busy")
         else:
