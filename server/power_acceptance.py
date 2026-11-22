@@ -62,7 +62,14 @@ async def check_ui(origin):
         await expect(power_buttons).to_have_count(2)
         for button in await power_buttons.all():
             await expect(button).to_have_css("text-align", "left")
-            await expect(button).to_have_css("font-size", "12px")
+            await expect(button).to_have_css("font-size", "11px")
+        computers = page.get_by_role("button", name="Компьютеры", exact=True)
+        await computers.click()
+        only_sessions = page.get_by_role("checkbox", name="Только с графической сессией")
+        await expect(only_sessions).to_be_checked()
+        await expect(page.locator(".seat")).to_have_count(0)
+        await only_sessions.uncheck()
+        await computers.click()
         menu = page.get_by_role("menu")
         shutdown = menu.get_by_role("menuitem", name="Выключить", exact=True)
         status = page.locator("#power-status")
@@ -123,7 +130,7 @@ async def check_ui(origin):
         ]
         await page.unroute("**/power", simulate_power)
 
-        await page.get_by_role("button", name="Компьютеры", exact=True).click()
+        await computers.click()
         await page.get_by_role("checkbox", name="pc-02").uncheck()
         await expect(second).to_have_count(0)
         await expect(page.locator(".seat[data-selected]")).to_have_count(1)

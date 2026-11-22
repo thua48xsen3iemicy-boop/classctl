@@ -578,9 +578,9 @@ function renderGrid() {
     storageKey = key;
     selectedNodes.clear();
     hidden = new Set();
-    sessionFilter.checked = false;
+    sessionFilter.checked = true;
     try {
-      sessionFilter.checked = localStorage.getItem(sessionFilterKey + roomId) === "true";
+      sessionFilter.checked = localStorage.getItem(sessionFilterKey + roomId) !== "false";
       const saved = JSON.parse(localStorage.getItem(key));
       if (Array.isArray(saved)) hidden = new Set(saved);
     } catch {}
