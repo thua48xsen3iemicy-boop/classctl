@@ -39,11 +39,12 @@ supervisor=supervise-daemon
 respawn_delay=3
 respawn_max=10
 respawn_period=60
-depend() { need net; }
+depend() { use net; }
 EOF
         chmod 755 "/etc/init.d/$name"
-        rc-update add "$name" default
-        rc-service "$name" restart
+        rc-update add "$name" default >&2
+        rc-service "$name" restart >&2
+        rc-service "$name" status >&2
     fi
 }
 session_desktop() {
@@ -86,7 +87,7 @@ prepare)
     if [[ -d /run/systemd/system ]]; then
         required+=(systemctl)
     else
-        required+=(rc-service rc-update)
+        required+=(openrc-run rc-service rc-update supervise-daemon)
     fi
     missing=()
     for cmd in "${required[@]}"; do
@@ -191,7 +192,9 @@ check)
     shift
     previous=
     for attempt in {1..20}; do
-        if response=$(curl --noproxy '*' -fsS --max-time 4 "$url/state" 2>&1); then
+        if ! status=$(curl --noproxy '*' -fsS --max-time 4 -o /dev/null "$url/" 2>&1); then
+            status="Waiting for portal at $url/ ($status)"
+        elif response=$(curl --noproxy '*' -fsS --max-time 4 "$url/state" 2>&1); then
             if status=$(python3 -c '
 import json, sys
 try:
