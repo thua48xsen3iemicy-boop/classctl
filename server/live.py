@@ -463,6 +463,7 @@ def ui_app(relay):
     for url, path in {
         "/": "web/live.html",
         "/live.js": "web/live.js",
+        "/theme.js": "web/theme.js",
         "/input.js": "web/input.js",
         "/input-keys.json": "contracts/input-keys.json",
         "/live.css": "web/live.css",

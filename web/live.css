@@ -9,8 +9,29 @@
   --text: #eef3f8;
   --muted: #a9b7c6;
   --accent: #75dbc5;
+  --sidebar-surface: #161d25;
+  --preview-surface: #090e14;
+  --empty-surface: #141b23;
+  --tools-surface: #23352c;
+  --sidebar-shadow: #0006;
+  --menu-shadow: #0008;
   color: var(--text);
   background: var(--page);
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --page: #f3f6f8;
+  --surface: #fff;
+  --border: #bac8d2;
+  --text: #1c2833;
+  --muted: #465d6e;
+  --accent: #006e5d;
+  --sidebar-surface: #e8eef3;
+  --preview-surface: #dee6ec;
+  --empty-surface: #e4ebf1;
+  --tools-surface: #e1eee8;
+  --sidebar-shadow: #243b4a26;
+  --menu-shadow: #243b4a33;
 }
 @layer typography {
   /* Layered important rules keep component styles from resetting the portal typography. */
@@ -51,11 +72,14 @@ body {
 }
 #overview-rail {
   grid-area: 1 / 1;
-  align-self: start;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   min-width: 0;
-  padding-top: 6px;
+  padding: 6px 0;
+}
+#overview-rail > * {
+  flex: none;
 }
 #sidebar.open + #overview-rail {
   visibility: hidden;
@@ -74,7 +98,7 @@ body {
   display: grid;
   gap: 4px;
 }
-#rail-power button {
+.rail-button {
   display: grid;
   place-items: center;
   width: 100%;
@@ -86,8 +110,40 @@ body {
   border-radius: 4px;
   cursor: pointer;
 }
-#rail-power button:hover:not(:disabled) {
+.rail-button:hover:not(:disabled) {
   border-color: var(--accent);
+}
+#rail-theme {
+  margin-top: auto;
+}
+.computers-icon {
+  position: relative;
+  width: 14px;
+  height: 14px;
+}
+.computers-icon::before,
+.computers-icon::after {
+  position: absolute;
+  content: "";
+}
+.computers-icon::before {
+  inset: 1px 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+}
+.computers-icon::after {
+  inset: auto 3px 1px;
+  height: 3px;
+  background:
+    linear-gradient(currentColor, currentColor) center bottom / 100% 1px no-repeat,
+    linear-gradient(currentColor, currentColor) center top / 1px 100% no-repeat;
+}
+.theme-icon::before {
+  content: "\2600\fe0e";
+  font: 16px/1 "DejaVu Sans", sans-serif;
+}
+:root[data-theme="light"] .theme-icon::before {
+  content: "\263e\fe0e";
 }
 #sidebar {
   position: absolute;
@@ -101,14 +157,24 @@ body {
   transform: none;
 }
 #sidebar-panel {
+  display: flex;
+  flex-direction: column;
   height: 100%;
   overflow: auto;
   padding: 12px;
-  background: #161d25;
+  background: var(--sidebar-surface);
   border-right: 1px solid var(--border);
 }
+#sidebar-panel > * {
+  flex-shrink: 0;
+}
+#sidebar-theme {
+  align-self: start;
+  width: var(--sidebar-handle-width);
+  margin-top: auto;
+}
 #sidebar.open:not(.pinned) #sidebar-panel {
-  box-shadow: 8px 0 24px #0006;
+  box-shadow: 8px 0 24px var(--sidebar-shadow);
 }
 #sidebar button {
   color: var(--text);
@@ -225,7 +291,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
-  box-shadow: 0 8px 24px #0008;
+  box-shadow: 0 8px 24px var(--menu-shadow);
 }
 #power-menu-label {
   display: block;
@@ -339,7 +405,7 @@ body {
   border: 0;
   border-radius: 3px;
   padding: 0;
-  background: #090e14;
+  background: var(--preview-surface);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -362,7 +428,7 @@ button:focus-visible,
   margin: 0;
   padding: 5px;
   border-radius: 3px;
-  background: #141b23;
+  background: var(--empty-surface);
   color: var(--muted);
   text-align: center;
 }
@@ -372,7 +438,7 @@ button:focus-visible,
   z-index: 5;
   overflow: hidden;
   background: #101713;
-  color: #fff;
+  color: var(--text);
 }
 #tools {
   position: absolute;
@@ -381,7 +447,7 @@ button:focus-visible,
   top: 50%;
   transform: translate(-100%, -50%);
   transition: transform 0.16s ease;
-  background: #23352c;
+  background: var(--tools-surface);
   border-radius: 0 6px 6px 0;
 }
 #tools.open {
@@ -401,8 +467,8 @@ button:focus-visible,
   left: 100%;
   top: 50%;
   transform: translateY(-50%);
-  color: white;
-  background: #23352c;
+  color: var(--text);
+  background: var(--tools-surface);
   border: 0;
   border-radius: 0 5px 5px 0;
   font: inherit;
