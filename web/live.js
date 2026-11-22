@@ -548,6 +548,14 @@ function showChoices(open) {
   el("tab").setAttribute("aria-expanded", String(open));
 }
 el("tab").onclick = () => showChoices(el("choices-panel").hidden);
+const sessionFilter = el("active-sessions-only");
+const sessionFilterKey = "classctl.activeSessionsOnly.";
+sessionFilter.onchange = () => {
+  try {
+    localStorage.setItem(sessionFilterKey + state.room.roomId, String(sessionFilter.checked));
+  } catch {}
+  renderGrid();
+};
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || focus || sidebarPanel.inert) return;
   if (!el("choices-panel").hidden) {
@@ -560,12 +568,15 @@ document.addEventListener("keydown", (event) => {
 });
 
 function renderGrid() {
-  const key = "classctl.hiddenNodes." + state.room.roomId;
+  const { roomId } = state.room;
+  const key = "classctl.hiddenNodes." + roomId;
   if (key !== storageKey) {
     storageKey = key;
     selectedNodes.clear();
     hidden = new Set();
+    sessionFilter.checked = false;
     try {
+      sessionFilter.checked = localStorage.getItem(sessionFilterKey + roomId) === "true";
       const saved = JSON.parse(localStorage.getItem(key));
       if (Array.isArray(saved)) hidden = new Set(saved);
     } catch {}
@@ -574,17 +585,29 @@ function renderGrid() {
     (a, b) => a.row - b.row || a.column - b.column,
   );
   const computers = ordered.filter((seat) => seat.nodeId);
-  const visible = computers.filter((seat) => !hidden.has(seat.nodeId));
+  const matching = sessionFilter.checked
+    ? computers.filter(({ nodeId }) => {
+        const node = state.nodes[nodeId];
+        return node?.availability === "online" && node.session;
+      })
+    : ordered;
+  const seats = matching.filter((seat) => !hidden.has(seat.nodeId));
+  const visible = seats.filter((seat) => seat.nodeId);
   const visibleIds = new Set(visible.map((seat) => seat.nodeId));
   for (const id of selectedNodes) if (!visibleIds.has(id)) selectedNodes.delete(id);
   if (menuTargets.some((id) => !visibleIds.has(id))) closePowerMenu();
   updateChoices(computers, visible);
-  const seats = ordered.filter((seat) => !hidden.has(seat.nodeId));
   el("tab").hidden = !computers.length;
   if (!computers.length) showChoices(false);
-  const emptyMessage = "Все компьютеры скрыты. Выберите нужные в панели «Компьютеры».";
-  if (computers.length && !visible.length) el("notice").textContent = emptyMessage;
-  else if (el("notice").textContent === emptyMessage) el("notice").textContent = "";
+  const notice = el("notice");
+  const hiddenMessage = "Все компьютеры скрыты. Выберите нужные в панели «Компьютеры».";
+  const noSessions = "Нет компьютеров с графической сессией.";
+  if (computers.length && !visible.length) {
+    const message = sessionFilter.checked && !matching.length ? noSessions : hiddenMessage;
+    if (notice.textContent !== message) notice.textContent = message;
+  } else if ([hiddenMessage, noSessions].includes(notice.textContent)) {
+    notice.textContent = "";
+  }
   grid.style.setProperty("--columns", Math.max(1, Math.ceil(Math.sqrt(seats.length))));
   grid.toggleAttribute("data-one-seat", seats.length === 1);
   const ids = new Set(seats.map((s) => s.seatId));
