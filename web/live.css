@@ -280,8 +280,9 @@ button:focus-visible,
   text-align: center;
 }
 #focus {
-  height: 100dvh;
-  position: relative;
+  position: fixed;
+  inset: 0;
+  z-index: 5;
   overflow: hidden;
   background: #101713;
   color: #fff;

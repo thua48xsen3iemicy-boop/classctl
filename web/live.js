@@ -4,8 +4,10 @@ import { bindInput } from "/input.js";
 const el = (id) => document.getElementById(id);
 let state, focus;
 const cards = new Map();
+const overview = el("overview");
 const viewport = el("viewport");
 const grid = el("grid");
+const monitorView = el("focus");
 let zoom = 1;
 viewport.addEventListener(
   "wheel",
@@ -69,17 +71,23 @@ function closeFocus() {
   const current = focus;
   focus = null;
   setDrawer(false);
-  if (document.fullscreenElement === el("focus"))
-    document.exitFullscreen().catch(() => {});
+  const fullscreenExit =
+    document.fullscreenElement === monitorView
+      ? document.exitFullscreen().catch(() => {})
+      : Promise.resolve();
   if (current.connection) closeConnection(current.connection);
-  el("focus").hidden = true;
-  el("overview").hidden = false;
-  return current.scrollTop;
+  monitorView.hidden = true;
+  overview.inert = false;
+  return { ...current, fullscreenExit };
 }
 function back() {
-  const scrollTop = closeFocus();
+  const view = closeFocus();
+  if (!view) return;
   if (state) renderGrid();
-  if (scrollTop !== undefined) viewport.scrollTop = scrollTop;
+  viewport.scrollTop = view.scrollTop;
+  view.fullscreenExit.then(() => {
+    if (!focus && view.trigger.isConnected) view.trigger.focus({ preventScroll: true });
+  });
 }
 el("back").onclick = back;
 function setDrawer(open) {
@@ -108,7 +116,7 @@ el("tools").onfocusout = (e) => {
 };
 document.addEventListener("fullscreenchange", () => {
   if (!focus) return;
-  if (document.fullscreenElement === el("focus")) focus.fullscreen = true;
+  if (document.fullscreenElement === monitorView) focus.fullscreen = true;
   else if (focus.fullscreen) back();
 });
 document.addEventListener(
@@ -132,20 +140,19 @@ function signature(seat) {
     state.wheelNodes?.includes(seat.nodeId),
   ]);
 }
-function openView(seat, id) {
+function openView(seat, id, trigger) {
   const view = {
-    seat, signature: signature(seat),
+    seat, trigger, signature: signature(seat),
     scrollTop: viewport.scrollTop,
   };
   closePowerMenu();
   showChoices(false);
   if (!sidebarPinned) showSidebar(false);
   focus = view;
-  el("overview").hidden = true;
-  clearGrid();
-  el("focus").hidden = false;
+  overview.inert = true;
+  monitorView.hidden = false;
   // The browser requires user activation here, before any network await.
-  el("focus")
+  monitorView
     .requestFullscreen?.()
     .then(() => {
       view.fullscreen = true;
@@ -153,6 +160,7 @@ function openView(seat, id) {
     .catch(() => {});
   el("notice").textContent = "";
   connectMonitor(view, id);
+  el("handle").focus({ preventScroll: true });
 }
 function connectMonitor(view, id) {
   const { seat } = view;
@@ -191,7 +199,7 @@ function connectMonitor(view, id) {
       el("mode").textContent = "Управление включено";
     } else el("mode").textContent = "Режим просмотра";
   };
-  el("focus").append(video);
+  monitorView.append(video);
   const stop = () => {
     if (!isCurrent()) return;
     back();
@@ -271,7 +279,7 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
   panel.className = "monitor";
   panel.type = "button";
   panel.setAttribute("aria-label", seat.nodeId + " · " + name);
-  panel.onclick = () => openView(seat, m.monitorId);
+  panel.onclick = () => openView(seat, m.monitorId, panel);
   outputs.append(panel);
   let verified = 0,
     cancelled = false;
