@@ -49,7 +49,10 @@ def worker(host, *args, pip_proxy=None, pip_index_url=None):
     prefix = "".join(f"{key}={shlex.quote(value)}\n"
                      for key, value in settings.items() if value is not None)
     script = prefix.encode() + script
-    return remote(host, *privilege(host), "bash", "-s", "--", *args, data=script)
+    try:
+        return remote(host, *privilege(host), "bash", "-s", "--", *args, data=script)
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"{host}: {args[0]} failed (exit {error.returncode})") from None
 
 
 def upload(host, path, data, mode="0644"):
@@ -183,6 +186,12 @@ def existing_node_policy(server, state, unchanged):
 
 def deploy(cfg, state, tmp, only_nodes):
     server, dns, port = cfg["coordinator"], cfg["dns"], cfg["port"]
+    existing_room = worker(server, "existing-room").decode().strip()
+    if existing_room and existing_room != cfg["room"]:
+        raise ValueError(
+            f"{server}: existing room is {existing_room}, requested {cfg['room']}. "
+            "Check the coordinator and room in the deployment inventory."
+        )
     students = [s for s in cfg["students"] if not only_nodes or s["node"] in only_nodes]
     policy = {"teachers": {"local": {"rooms": {cfg["room"]: cfg["rights"]}}}, "nodes": {}}
     origin = nextcloud_origin(cfg.get("nextcloud_origin"))
