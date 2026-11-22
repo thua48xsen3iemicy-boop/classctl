@@ -39,11 +39,12 @@ supervisor=supervise-daemon
 respawn_delay=3
 respawn_max=10
 respawn_period=60
-depend() { need net; }
+depend() { use net; }
 EOF
         chmod 755 "/etc/init.d/$name"
-        rc-update add "$name" default
-        rc-service "$name" restart
+        rc-update add "$name" default >&2
+        rc-service "$name" restart >&2
+        rc-service "$name" status >&2
     fi
 }
 session_desktop() {
@@ -87,7 +88,7 @@ prepare)
     if [[ -d /run/systemd/system ]]; then
         required+=(systemctl)
     else
-        required+=(rc-service rc-update)
+        required+=(openrc-run rc-service rc-update supervise-daemon)
     fi
     missing=()
     for cmd in "${required[@]}"; do
@@ -174,6 +175,7 @@ student)
     node=$2 url=$3
     "$release/.venv/bin/python" -c 'from PIL import features; import sys; sys.exit(0 if features.check_feature("xcb") else "Pillow requires XCB")'
     install -d -m 755 "$base/bin"
+    install -d -m 700 "$var/node"
     install -d -m 755 /etc/xdg/autostart
     migrate_autostart
     cat > "$base/bin/session-start" <<EOF
@@ -187,7 +189,7 @@ EOF
 #!/bin/sh
 set -eu
 install -d -m 755 /run/classctl
-exec $release/.venv/bin/python $release/node/live.py --server $url --node $node --socket /run/classctl/seat0.sock --ca $etc/node/ca.pem --cert $etc/node/cert.pem --key $etc/node/key.pem
+exec $release/.venv/bin/python $release/node/live.py --server $url --node $node --socket /run/classctl/seat0.sock --ca $etc/node/ca.pem --cert $etc/node/cert.pem --key $etc/node/key.pem --power-db $var/node/power.sqlite
 EOF
     chmod 755 "$base/bin/node-start"
     service_install classctl-node root "$base/bin/node-start" ""
@@ -202,7 +204,9 @@ check)
     shift
     previous=
     for attempt in {1..20}; do
-        if response=$(curl --noproxy '*' -fsS --max-time 4 "$url/state" 2>&1); then
+        if ! status=$(curl --noproxy '*' -fsS --max-time 4 -o /dev/null "$url/" 2>&1); then
+            status="Waiting for portal at $url/ ($status)"
+        elif response=$(curl --noproxy '*' -fsS --max-time 4 "$url/state" 2>&1); then
             if status=$(python3 -c '
 import json, sys
 try:

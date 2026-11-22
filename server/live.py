@@ -8,8 +8,10 @@ import secrets
 import signal
 import sqlite3
 import ssl
+import sys
 import time
 from contextlib import AsyncExitStack
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
@@ -17,6 +19,9 @@ from aiohttp import WSMsgType, web
 from secure import AccessPolicy, CONTRACTS, Node, PREVIEW, inventory, validate
 
 ROOT = CONTRACTS.parent
+sys.path.insert(0, str(ROOT))
+from actions import power
+
 UI_HOST = "127.0.0.1"
 LOCAL_SUBJECT = "local"
 
@@ -43,16 +48,25 @@ class Relay(AccessPolicy):
         self.labels = {}
         self.channels = {}
         self.pending = {}
+        self.power_requests = {}
         self.ice = json.loads(Path(args.ice).read_text()) if args.ice else []
 
-    def require_view(self):
-        permissions = self.permissions(self.policy(), LOCAL_SUBJECT)
+    def require_view(self, policy=None):
+        if policy is None:
+            policy = self.policy()
+        permissions = self.permissions(policy, LOCAL_SUBJECT)
         if "view" not in permissions:
             raise web.HTTPForbidden()
         return permissions
 
     async def state(self, request):
-        permissions = self.require_view()
+        policy = self.policy()
+        permissions = self.require_view(policy)
+        power_nodes = None
+        if power.PERMISSION in permissions:
+            power_nodes = [
+                ident for ident in self.nodes if self.power_rejection(policy, ident) is None
+            ]
         labels = {}
         for ident, label in self.labels.items():
             session = self.nodes[ident].status["session"]
@@ -80,9 +94,103 @@ class Relay(AccessPolicy):
                     if "control.wheel.v1" in node.capabilities["features"]
                     and "control" in permissions
                 ],
+                powerNodes=power_nodes,
             ),
             headers={"Cache-Control": "no-store"},
         )
+
+    def power_rejection(self, policy, node_id):
+        node = self.nodes[node_id]
+        source = self.sources.get(node_id)
+        if (
+            source is None or source.closed or node.status["availability"] != "online"
+            or policy.get("nodes", {}).get(source["subject"]) != node_id
+        ):
+            return "offline"
+        available = {
+            action["actionId"] for action in node.capabilities["actions"]
+            if action["permission"] == power.PERMISSION
+            and action["context"] == "system"
+            and action["parameterSchema"] == power.PARAMETER_SCHEMA
+            and action["maxTtlSeconds"] >= power.TTL
+        }
+        if not {power.SHUTDOWN, power.REBOOT} <= available:
+            return "unsupported"
+        return None
+
+    async def power_action(self, request):
+        if request.headers.get("Origin") != "http://" + request.host:
+            raise web.HTTPForbidden()
+        if request.content_type != "application/json":
+            raise web.HTTPUnsupportedMediaType()
+        try:
+            command = await request.json()
+        except ValueError:
+            raise web.HTTPBadRequest() from None
+        if power.PORTAL_GROUP.is_valid(command):
+            targets = command["nodeIds"]
+        elif power.PORTAL.is_valid(command):
+            targets = [command["nodeId"]]
+        else:
+            raise web.HTTPBadRequest()
+        policy = self.policy()
+        if power.PERMISSION not in self.require_view(policy):
+            raise web.HTTPForbidden()
+        if any(node_id not in self.nodes for node_id in targets):
+            raise web.HTTPNotFound()
+        request_id = secrets.token_hex(16)
+        # Allow a small clock difference while keeping both clocks inside the TTL.
+        issued = datetime.now(timezone.utc) - timedelta(seconds=2)
+        operation = dict(
+            version=1, kind="action.request", requestId=request_id,
+            actionId=command["actionId"], issuedAt=issued.isoformat(),
+            expiresAt=(issued + timedelta(seconds=power.TTL)).isoformat(), parameters={},
+        )
+        outcomes = await asyncio.gather(*(
+            self.dispatch_power(policy, node_id, operation) for node_id in targets
+        ))
+        return web.json_response(
+            power.result(request_id, outcomes), headers={"Cache-Control": "no-store"}
+        )
+
+    async def dispatch_power(self, policy, node_id, operation):
+        request_id = operation["requestId"]
+        target = dict(actionId=operation["actionId"], nodeId=node_id, requestId=request_id)
+        rejection = self.power_rejection(policy, node_id)
+        if rejection or node_id in self.power_requests:
+            outcome = power.outcome(node_id, "rejected", rejection or "busy")
+        else:
+            source = self.sources[node_id]
+            self.audit(LOCAL_SUBJECT, "power", target, "issued")
+            pending = asyncio.get_running_loop().create_future()
+            self.power_requests[node_id] = (request_id, source, pending)
+            try:
+                async with asyncio.timeout(6):
+                    await source.send_json(dict(operation, nodeIds=[node_id]))
+                    outcome = await pending
+            except (ConnectionError, TimeoutError):
+                outcome = power.outcome(node_id, "unknown", "unconfirmed")
+            finally:
+                self.power_requests.pop(node_id, None)
+        self.audit(
+            LOCAL_SUBJECT, "power", dict(target, reason=outcome["reason"]), outcome["state"]
+        )
+        return outcome
+
+    def receive_power_result(self, node_id, source, data):
+        pending = self.power_requests.get(node_id)
+        if not pending or pending[1] is not source or pending[2].done():
+            return
+        request_id, _, future = pending
+        if not power.WIRE.is_valid(data) or data["requestId"] != request_id:
+            return
+        outcomes = data["outcomes"]
+        if (
+            len(outcomes) == 1
+            and outcomes[0]["nodeId"] == node_id
+            and outcomes[0]["state"] != "accepted"
+        ):
+            future.set_result(outcomes[0])
 
     async def browser(self, request):
         self.require_view()
@@ -181,6 +289,9 @@ class Relay(AccessPolicy):
                     break
                 if msg.type == WSMsgType.TEXT:
                     data = json.loads(msg.data)
+                    if data.get("kind") == "action.result":
+                        self.receive_power_result(ident, ws, data)
+                        continue
                     if data.get("kind") in ("status", "capabilities"):
                         self.nodes[ident].update(data["kind"], data, time.monotonic())
                         session = self.nodes[ident].status["session"]
@@ -268,6 +379,9 @@ class Relay(AccessPolicy):
         finally:
             self.sources.pop(ident, None)
             self.nodes[ident].disconnect()
+            pending = self.power_requests.get(ident)
+            if pending and pending[1] is ws and not pending[2].done():
+                pending[2].set_result(power.outcome(ident, "unknown", "unconfirmed"))
             for dest, source, _, _ in list(self.channels.values()):
                 if source is ws:
                     await dest.close()
@@ -333,6 +447,7 @@ def ui_app(relay):
         [
             web.get("/state", relay.state),
             web.get("/stream", relay.browser),
+            web.post("/power", relay.power_action),
         ]
     )
 

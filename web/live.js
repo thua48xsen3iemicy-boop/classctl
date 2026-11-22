@@ -5,6 +5,7 @@ const el = (id) => document.getElementById(id);
 let state, focus;
 const cards = new Map();
 const viewport = el("viewport");
+const grid = el("grid");
 let zoom = 1;
 viewport.addEventListener(
   "wheel",
@@ -22,17 +23,20 @@ viewport.addEventListener(
       4,
       Math.max(
         0.5,
-        zoom * Math.exp(-Math.max(-120, Math.min(120, delta)) * 0.002),
+        zoom * Math.exp(-Math.max(-120, Math.min(120, delta)) * 0.001),
       ),
     );
-    const x = event.clientX - viewport.getBoundingClientRect().left;
-    const y = event.clientY - viewport.getBoundingClientRect().top;
-    const ratio = next / zoom;
-    const left = (viewport.scrollLeft + x) * ratio - x,
-      top = (viewport.scrollTop + y) * ratio - y;
+    if (next === zoom) return;
+    const card = event.target.closest(".seat");
+    const before = card?.getBoundingClientRect();
     zoom = next;
-    el("grid").style.setProperty("--scale", zoom);
-    viewport.scrollTo(left, top);
+    grid.style.setProperty("--scale", zoom);
+    if (before) {
+      // Keep the card at the same vertical position under the pointer after reflow.
+      const position = (event.clientY - before.top) / before.height;
+      const after = card.getBoundingClientRect();
+      viewport.scrollTop += after.top + position * after.height - event.clientY;
+    }
   },
   { passive: false },
 );
@@ -40,8 +44,8 @@ document.addEventListener("keydown", (event) => {
   if (!focus && event.ctrlKey && event.key === "0") {
     event.preventDefault();
     zoom = 1;
-    el("grid").style.removeProperty("--scale");
-    viewport.scrollTo(0, 0);
+    grid.style.removeProperty("--scale");
+    viewport.scrollTop = 0;
   }
 });
 const socket = (control = false) =>
@@ -52,7 +56,7 @@ const socket = (control = false) =>
 function clearGrid() {
   for (const card of cards.values()) card.stop();
   cards.clear();
-  el("grid").replaceChildren();
+  grid.replaceChildren();
 }
 function closeConnection(connection) {
   connection.cleanup?.();
@@ -70,12 +74,12 @@ function closeFocus() {
   if (current.connection) closeConnection(current.connection);
   el("focus").hidden = true;
   el("overview").hidden = false;
-  return current.scroll;
+  return current.scrollTop;
 }
 function back() {
-  const scroll = closeFocus();
+  const scrollTop = closeFocus();
   if (state) renderGrid();
-  if (scroll) viewport.scrollTo(...scroll);
+  if (scrollTop !== undefined) viewport.scrollTop = scrollTop;
 }
 el("back").onclick = back;
 function setDrawer(open) {
@@ -131,8 +135,9 @@ function signature(seat) {
 function openView(seat, id) {
   const view = {
     seat, signature: signature(seat),
-    scroll: [viewport.scrollLeft, viewport.scrollTop],
+    scrollTop: viewport.scrollTop,
   };
+  closePowerMenu();
   showChoices(false);
   if (!sidebarPinned) showSidebar(false);
   focus = view;
@@ -250,19 +255,19 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
     monitorId: m.monitorId,
   };
   const panel = document.createElement("button"),
-    canvas = document.createElement("canvas"),
-    label = document.createElement("span");
+    canvas = document.createElement("canvas");
   canvas.width = 1;
   canvas.height = 1;
-  label.className = "signal";
-  function signal(text) {
-    label.textContent = text;
-    label.dataset.quiet = String(text === "в эфире" || text === "статично");
-    panel.setAttribute("aria-description", identity + " · " + text);
-    panel.title = identity + " · " + name + " · " + text;
+  let previewIssue;
+  function setPreviewIssue(text = "") {
+    if (text === previewIssue) return;
+    previewIssue = text;
+    const suffix = text ? " · " + text : "";
+    panel.setAttribute("aria-description", identity + suffix);
+    panel.title = identity + " · " + name + suffix;
   }
-  signal("ожидание");
-  panel.append(canvas, label);
+  setPreviewIssue("ожидание");
+  panel.append(canvas);
   panel.className = "monitor";
   panel.type = "button";
   panel.setAttribute("aria-label", seat.nodeId + " · " + name);
@@ -278,7 +283,7 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
       canvas.height = image.height;
       canvas.getContext("2d").drawImage(image, 0, 0);
       verified = performance.now();
-      signal("в эфире");
+      setPreviewIssue();
     },
     clear: () => {
       canvas.width = 1;
@@ -295,7 +300,7 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
         const msg = JSON.parse(data);
         if (receiver.accept(msg) && msg.kind === "preview.verified") {
           verified = performance.now();
-          signal("статично");
+          setPreviewIssue();
         }
       } else {
         const n = new DataView(data).getUint32(0);
@@ -310,12 +315,12 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
     }
   };
   const timer = setInterval(() => {
-    if (verified && performance.now() - verified > 2000) signal("кадр устарел");
+    if (verified && performance.now() - verified > 2000) setPreviewIssue("кадр устарел");
   }, 500);
   ws.onclose = () => {
     receiver.reset();
     clearInterval(timer);
-    signal("нет связи");
+    setPreviewIssue("нет связи");
     if (!cancelled) onDisconnect();
   };
   return () => {
@@ -326,6 +331,7 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
   };
 }
 let hidden = new Set(), choiceSignature, storageKey;
+const choiceUsers = new Map();
 const sidebar = el("sidebar");
 const sidebarHandle = el("sidebar-handle");
 const sidebarPanel = el("sidebar-panel");
@@ -373,11 +379,187 @@ document.addEventListener("pointerdown", (event) => {
   if (!sidebarPinned && !sidebar.contains(event.target)) showSidebar(false);
 });
 
+const powerPanel = el("power");
+const powerMenu = el("power-menu");
+const powerStatus = el("power-status");
+const powerButtons = [...powerPanel.querySelectorAll("button")];
+const menuButtons = [...powerMenu.querySelectorAll("button")];
+const selectedNodes = new Set();
+const powerMessages = {
+  "handed-off": "Команда передана системе",
+  offline: "Компьютер вне сети",
+  unsupported: "Действие недоступно на этом компьютере",
+  busy: "Предыдущая команда ещё действует",
+  expired: "Срок команды истёк",
+  "invalid-clock": "Проверьте время на компьютере",
+  "system-error": "Система отклонила команду",
+  unconfirmed: "Выполнение команды не подтверждено",
+};
+let powerPending = false, powerStatusTimer, menuTargets = [], menuTrigger;
+
+function renderPower() {
+  const nodes = state?.powerNodes;
+  const available = Array.isArray(nodes);
+  powerPanel.hidden = !available;
+  if (!available) {
+    selectedNodes.clear();
+    closePowerMenu();
+  }
+  for (const button of powerButtons) button.disabled = powerPending || !nodes?.length;
+  const menuDisabled = powerPending || !menuTargets.some((id) => nodes?.includes(id));
+  for (const button of menuButtons) button.disabled = menuDisabled;
+}
+
+function formatPowerResult(outcomes) {
+  if (outcomes.length === 1) {
+    const { nodeId, reason } = outcomes[0];
+    return `${nodeId} · ${powerMessages[reason] || "Действие отклонено"}`;
+  }
+  const failures = new Map();
+  let succeeded = 0;
+  for (const { state, reason } of outcomes) {
+    if (state === "succeeded") succeeded++;
+    else failures.set(reason, (failures.get(reason) || 0) + 1);
+  }
+  return [
+    `Команда передана системе: ${succeeded} из ${outcomes.length}`,
+    ...Array.from(failures, ([reason, count]) => `${powerMessages[reason] || "Действие отклонено"}: ${count}`),
+  ].join(" · ");
+}
+
+async function sendPower(button, nodeIds, scope) {
+  if (powerPending || !nodeIds.some((id) => state?.powerNodes?.includes(id))) return;
+  if (!window.confirm(`${button.textContent} ${scope}? Несохранённые данные могут быть потеряны.`)) return;
+  clearTimeout(powerStatusTimer);
+  powerPending = true;
+  powerStatus.textContent = "Отправка команды…";
+  renderPower();
+  try {
+    const response = await fetch("/power", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actionId: button.dataset.action, nodeIds }),
+    });
+    if (response.status === 403) {
+      powerStatus.textContent = "Недостаточно прав";
+      return;
+    }
+    if (!response.ok) throw Error();
+    const { outcomes } = await response.json();
+    powerStatus.textContent = formatPowerResult(outcomes);
+  } catch {
+    powerStatus.textContent = "Выполнение команды не подтверждено";
+  } finally {
+    powerPending = false;
+    powerStatusTimer = setTimeout(() => {
+      powerStatus.textContent = "";
+    }, 5000);
+    renderPower();
+  }
+}
+
+for (const button of powerButtons) button.onclick = () => {
+  const nodeIds = [...(state?.powerNodes ?? [])];
+  sendPower(button, nodeIds, `компьютеры аудитории (${nodeIds.length} доступно)`);
+};
+
+function reflectSelection(card) {
+  const id = card.dataset.nodeId;
+  const selected = selectedNodes.has(id);
+  card.toggleAttribute("data-selected", selected);
+  card.setAttribute("aria-label", selected ? `${id}, выбран` : id);
+}
+
+function toggleSelection(card) {
+  const id = card.dataset.nodeId;
+  if (selectedNodes.has(id)) selectedNodes.delete(id);
+  else selectedNodes.add(id);
+  reflectSelection(card);
+}
+
+function openPowerMenu(card, x, y) {
+  const id = card.dataset.nodeId;
+  menuTargets = selectedNodes.has(id) ? [...selectedNodes] : [id];
+  menuTrigger = card.contains(document.activeElement) ? document.activeElement : card;
+  el("power-menu-label").textContent = menuTargets.length === 1 ? id : `Выбрано ${menuTargets.length} ПК`;
+  powerMenu.hidden = false;
+  renderPower();
+  powerMenu.style.left = `${Math.max(0, Math.min(x, innerWidth - powerMenu.offsetWidth))}px`;
+  powerMenu.style.top = `${Math.max(0, Math.min(y, innerHeight - powerMenu.offsetHeight))}px`;
+  (menuButtons[0].disabled ? powerMenu : menuButtons[0]).focus({ preventScroll: true });
+}
+
+function closePowerMenu(restoreFocus = false) {
+  if (powerMenu.hidden) return;
+  powerMenu.hidden = true;
+  if (restoreFocus) menuTrigger?.focus({ preventScroll: true });
+  menuTargets = [];
+  menuTrigger = null;
+}
+
+for (const button of menuButtons) button.onclick = () => {
+  const targets = menuTargets;
+  closePowerMenu(true);
+  sendPower(button, targets, targets.join(", "));
+};
+
+grid.addEventListener("click", (event) => {
+  const card = event.target.closest(".seat[data-node-id]");
+  if (!card || !event.ctrlKey || powerPanel.hidden) return;
+  event.preventDefault();
+  event.stopPropagation();
+  toggleSelection(card);
+  card.focus({ preventScroll: true });
+}, true);
+grid.addEventListener("contextmenu", (event) => {
+  const card = event.target.closest(".seat[data-node-id]");
+  if (!card || powerPanel.hidden) return;
+  event.preventDefault();
+  openPowerMenu(card, event.clientX, event.clientY);
+});
+grid.addEventListener("keydown", (event) => {
+  const card = event.target.closest(".seat[data-node-id]");
+  if (!card || powerPanel.hidden) return;
+  if (event.ctrlKey && event.code === "Space") {
+    event.preventDefault();
+    if (!event.repeat) toggleSelection(card);
+  } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+    event.preventDefault();
+    const { left, top } = card.getBoundingClientRect();
+    openPowerMenu(card, left, top);
+  }
+});
+powerMenu.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.stopPropagation();
+    closePowerMenu(true);
+  } else if (["ArrowDown", "ArrowUp"].includes(event.key) && !menuButtons[0].disabled) {
+    event.preventDefault();
+    menuButtons[document.activeElement === menuButtons[0] ? 1 : 0].focus();
+  }
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!powerMenu.contains(event.target)) closePowerMenu();
+});
+document.addEventListener("focusin", (event) => {
+  if (!powerMenu.contains(event.target)) closePowerMenu();
+});
+viewport.addEventListener("scroll", () => closePowerMenu());
+window.addEventListener("resize", () => closePowerMenu());
+
 function showChoices(open) {
   el("choices-panel").hidden = !open;
   el("tab").setAttribute("aria-expanded", String(open));
 }
 el("tab").onclick = () => showChoices(el("choices-panel").hidden);
+const sessionFilter = el("active-sessions-only");
+const sessionFilterKey = "classctl.activeSessionsOnly.";
+sessionFilter.onchange = () => {
+  try {
+    localStorage.setItem(sessionFilterKey + state.room.roomId, String(sessionFilter.checked));
+  } catch {}
+  renderGrid();
+};
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || focus || sidebarPanel.inert) return;
   if (!el("choices-panel").hidden) {
@@ -390,11 +572,15 @@ document.addEventListener("keydown", (event) => {
 });
 
 function renderGrid() {
-  const key = "classctl.hiddenNodes." + state.room.roomId;
+  const { roomId } = state.room;
+  const key = "classctl.hiddenNodes." + roomId;
   if (key !== storageKey) {
     storageKey = key;
+    selectedNodes.clear();
     hidden = new Set();
+    sessionFilter.checked = true;
     try {
+      sessionFilter.checked = localStorage.getItem(sessionFilterKey + roomId) !== "false";
       const saved = JSON.parse(localStorage.getItem(key));
       if (Array.isArray(saved)) hidden = new Set(saved);
     } catch {}
@@ -403,15 +589,29 @@ function renderGrid() {
     (a, b) => a.row - b.row || a.column - b.column,
   );
   const computers = ordered.filter((seat) => seat.nodeId);
-  const visible = computers.filter((seat) => !hidden.has(seat.nodeId));
+  const matching = sessionFilter.checked
+    ? computers.filter(({ nodeId }) => {
+        const node = state.nodes[nodeId];
+        return node?.availability === "online" && node.session;
+      })
+    : ordered;
+  const seats = matching.filter((seat) => !hidden.has(seat.nodeId));
+  const visible = seats.filter((seat) => seat.nodeId);
+  const visibleIds = new Set(visible.map((seat) => seat.nodeId));
+  for (const id of selectedNodes) if (!visibleIds.has(id)) selectedNodes.delete(id);
+  if (menuTargets.some((id) => !visibleIds.has(id))) closePowerMenu();
   updateChoices(computers, visible);
-  const seats = ordered.filter((seat) => !hidden.has(seat.nodeId));
   el("tab").hidden = !computers.length;
   if (!computers.length) showChoices(false);
-  const emptyMessage = "Все компьютеры скрыты. Выберите нужные в панели «Компьютеры».";
-  if (computers.length && !visible.length) el("notice").textContent = emptyMessage;
-  else if (el("notice").textContent === emptyMessage) el("notice").textContent = "";
-  const grid = el("grid");
+  const notice = el("notice");
+  const hiddenMessage = "Все компьютеры скрыты. Выберите нужные в панели «Компьютеры».";
+  const noSessions = "Нет компьютеров с графической сессией.";
+  if (computers.length && !visible.length) {
+    const message = sessionFilter.checked && !matching.length ? noSessions : hiddenMessage;
+    if (notice.textContent !== message) notice.textContent = message;
+  } else if ([hiddenMessage, noSessions].includes(notice.textContent)) {
+    notice.textContent = "";
+  }
   grid.style.setProperty("--columns", Math.max(1, Math.ceil(Math.sqrt(seats.length))));
   grid.toggleAttribute("data-one-seat", seats.length === 1);
   const ids = new Set(seats.map((s) => s.seatId));
@@ -430,6 +630,11 @@ function renderGrid() {
       entry = createCard(seat, state.nodes[seat.nodeId], displayName, sig);
       cards.set(seat.seatId, entry);
     }
+    if (seat.nodeId) {
+      if (powerPanel.hidden) entry.card.removeAttribute("tabindex");
+      else entry.card.tabIndex = 0;
+      reflectSelection(entry.card);
+    }
     const next = previous ? previous.nextElementSibling : grid.firstElementChild;
     if (entry.card !== next) grid.insertBefore(entry.card, next);
     previous = entry.card;
@@ -443,6 +648,7 @@ function createCard(seat, binding, displayName, sig) {
     .join(" · ");
   card.className = "seat";
   if (seat.nodeId) {
+    card.dataset.nodeId = seat.nodeId;
     const caption = document.createElement("h2");
     const computer = document.createElement("span");
     caption.className = "caption";
@@ -493,6 +699,7 @@ function updateChoices(seats, visible) {
   const next = JSON.stringify([storageKey, seats]);
   if (next !== choiceSignature) {
     el("choices").replaceChildren();
+    choiceUsers.clear();
     for (const seat of seats) {
       const label = document.createElement("label");
       const check = document.createElement("input");
@@ -504,10 +711,23 @@ function updateChoices(seats, visible) {
         try { localStorage.setItem(storageKey, JSON.stringify([...hidden])); } catch {}
         renderGrid();
       };
-      label.append(check, seat.nodeId);
+      const computer = document.createElement("span");
+      computer.className = "choice-node";
+      computer.textContent = seat.nodeId;
+      computer.title = seat.nodeId;
+      const user = document.createElement("span");
+      user.className = "choice-user";
+      label.append(check, computer, user);
       el("choices").append(label);
+      choiceUsers.set(seat.nodeId, user);
     }
     choiceSignature = next;
+  }
+  for (const [nodeId, user] of choiceUsers) {
+    const name = state.labels?.[nodeId]?.displayName ?? "";
+    if (user.textContent === name) continue;
+    user.textContent = name;
+    user.title = name;
   }
   el("count").textContent = "Показано " + visible.length + " из " + seats.length;
 }
@@ -517,6 +737,7 @@ async function poll() {
     if (!response.ok) throw Error();
     const initial = !state;
     state = await response.json();
+    renderPower();
     document.title = state.room.roomId + " · classctl";
     el("room-name").textContent = state.room.roomId;
     if (initial) el("notice").textContent = "";
@@ -526,6 +747,7 @@ async function poll() {
     } else renderGrid();
   } catch {
     state = null;
+    renderPower();
     showChoices(false);
     el("tab").hidden = true;
     closeFocus();

@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry, Resource
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
@@ -58,6 +59,30 @@ def check_session_identity():
             not validator.is_valid(dict(legacy, displayName=invalid_name)),
             "Принято неверное имя пользователя сессии",
         )
+
+
+def check_power():
+    common = read(CONTRACTS / "v1.schema.json")
+    schema = read(CONTRACTS / "power-v1.schema.json")
+    Draft202012Validator.check_schema(schema)
+    registry = Registry().with_resources([
+        ("urn:classctl:control:v1", Resource.from_contents(common)),
+        ("urn:classctl:power:v1", Resource.from_contents(schema)),
+    ])
+    portal = Draft202012Validator(schema, registry=registry)
+    portal.validate(read(CONTRACTS / "power/portal.json"))
+    require(not portal.is_valid(read(CONTRACTS / "power/invalid-portal.json")),
+            "Портал принял произвольные параметры выключения")
+    parameters = portal.evolve(schema=schema["$defs"]["parameters"])
+    parameters.validate(read(CONTRACTS / "examples/power-request.json")["parameters"])
+    require(not parameters.is_valid({"force": True}), "Служба принимает параметры выключения")
+    group_schema = read(CONTRACTS / "power-v2.schema.json")
+    Draft202012Validator.check_schema(group_schema)
+    group = Draft202012Validator(group_schema, registry=registry)
+    group.validate(read(CONTRACTS / "power/group.json"))
+    require(not group.is_valid(read(CONTRACTS / "power/invalid-group.json")),
+            "Портал принял повторяющуюся цель")
+    print("Схемы запросов питания v1 и v2: OK")
 
 
 def check_examples():
@@ -149,6 +174,7 @@ if __name__ == "__main__":
         check_preview(ROOT)
         check_input()
         check_session_identity()
+        check_power()
         check_links()
     except (ValueError, KeyError, OSError) as exc:
         sys.exit(f"Ошибка проверки: {exc}")

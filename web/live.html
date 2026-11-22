@@ -18,11 +18,22 @@
           <button id="tab" type="button" aria-expanded="false" aria-controls="choices-panel" hidden>Компьютеры</button>
           <section id="choices-panel" hidden>
             <p id="count"></p>
+            <label><input id="active-sessions-only" type="checkbox" checked /> Только с графической сессией</label>
             <div id="choices"></div>
+          </section>
+          <section id="power" aria-label="Питание компьютеров аудитории" hidden>
+            <button type="button" data-action="system.shutdown" disabled>Выключить все</button>
+            <button type="button" data-action="system.reboot" disabled>Перезагрузить все</button>
           </section>
         </div>
       </aside>
       <div id="viewport"><main id="grid" aria-label="Рабочие места"></main></div>
+      <div id="power-menu" role="menu" aria-labelledby="power-menu-label" tabindex="-1" hidden>
+        <strong id="power-menu-label" role="presentation"></strong>
+        <button type="button" role="menuitem" tabindex="-1" data-action="system.shutdown">Выключить</button>
+        <button type="button" role="menuitem" tabindex="-1" data-action="system.reboot">Перезагрузить</button>
+      </div>
+      <p id="power-status" role="status"></p>
     </div>
     <section id="focus" hidden>
       <nav id="tools" aria-label="Панель монитора">

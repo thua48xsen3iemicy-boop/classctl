@@ -103,6 +103,7 @@ def check_dense_grid(context, origin, status):
         nodes=nodes,
         iceServers=[],
         controlNodes=list(nodes),
+        powerNodes=list(nodes),
     )
     page.route("**/state", lambda route: route.fulfill(json=state))
     requests = []
@@ -133,22 +134,59 @@ def check_dense_grid(context, origin, status):
                           el.offsetHeight, getComputedStyle(el).fontSize]"""
             )
 
+        def zoom_by_wheel(delta, steps=1):
+            page.mouse.move(200, 200)
+            page.keyboard.down("Control")
+            for _ in range(steps):
+                page.mouse.wheel(0, delta)
+            page.keyboard.up("Control")
+
         before = dimensions()
-        page.keyboard.down("Control")
-        page.mouse.move(200, 200)
-        page.mouse.wheel(0, -120)
-        page.keyboard.up("Control")
+        zoom_by_wheel(-120)
         page.wait_for_function(
-            "document.querySelector('#grid').offsetWidth > document.querySelector('#viewport').clientWidth"
+            """() => {
+                const cards = document.querySelectorAll('#grid .seat');
+                return cards[4].getBoundingClientRect().top > cards[0].getBoundingClientRect().top;
+            }"""
         )
         after = dimensions()
         assert after[0] > before[0] and after[1:] == before[1:]
-        page.keyboard.press("Control+0")
+        assert page.evaluate("""() => {
+            const viewport = document.querySelector('#viewport');
+            return viewport.scrollWidth === viewport.clientWidth;
+        }""")
+
+        zoom_by_wheel(-120, steps=12)
         page.wait_for_function(
-            "document.querySelector('#grid').offsetWidth === document.querySelector('#viewport').clientWidth"
+            "getComputedStyle(document.querySelector('#grid')).gridTemplateColumns.split(' ').length === 1"
         )
+        assert page.evaluate("""() => {
+            const viewport = document.querySelector('#viewport');
+            return viewport.scrollWidth === viewport.clientWidth
+                && viewport.scrollHeight > viewport.clientHeight;
+        }""")
+
+        page.keyboard.press("Control+0")
+        assert dimensions() == before
+        assert page.locator("#viewport").evaluate("viewport => viewport.scrollTop") == 0
+
+        page.set_viewport_size(dict(width=320, height=768))
+        zoom_by_wheel(120, steps=7)
+        page.wait_for_function(
+            "getComputedStyle(document.querySelector('#grid')).gridTemplateColumns.split(' ').length === 2"
+        )
+        assert page.locator("#viewport").evaluate("el => el.scrollWidth === el.clientWidth")
+        assert page.locator(".seat").evaluate_all(
+            "cards => cards.every(card => card.querySelector('.outputs').offsetWidth === card.offsetWidth)"
+        )
+        page.set_viewport_size(dict(width=1920, height=1080))
+        page.keyboard.press("Control+0")
         monitor = status["session"]["monitors"][1]["monitorId"]
-        page.get_by_role("button", name="pc-25 · Экран 2", exact=True).click()
+        preview = page.get_by_role("button", name="pc-25 · Экран 2", exact=True)
+        preview.click(modifiers=["Control"])
+        assert page.locator('[data-node-id="pc-25"][data-selected]').count() == 1
+        assert not page.locator("#focus").is_visible()
+        preview.click()
         for _ in range(100):
             if any(m.get("request", {}).get("kind") == "access" for m in requests):
                 break
@@ -222,7 +260,7 @@ def check_dense_grid(context, origin, status):
             "document.querySelector('.monitor') && document.querySelector('#focus').hidden"
         )
         print(
-            "Layout fixture: 25 seats, 50 monitor cards, no scrolling; correct target and full-page video"
+            "Layout fixture: 25 seats, 50 previews, zoom wraps within the viewport, correct monitor target"
         )
     finally:
         page.close()
@@ -262,18 +300,31 @@ def check_overview_grid(context, origin, status):
     """)
     try:
         page.goto(origin)
-        page.get_by_text("Нет графической сессии").wait_for()
         cards = page.locator(".seat")
+        cards.nth(4).wait_for()
+        assert cards.count() == 5
+        handle = page.get_by_role("button", name="Меню аудитории")
+        computers = page.get_by_role("button", name="Компьютеры", exact=True)
+        only_sessions = page.get_by_role("checkbox", name="Только с графической сессией")
+        handle.hover()
+        computers.click()
+        assert only_sessions.is_checked()
+        only_sessions.uncheck()
+        computers.click()
+        page.mouse.move(1000, 700)
+        page.get_by_text("Нет графической сессии").wait_for()
         captions = cards.locator(".caption")
         assert captions.all_text_contents() == [
             "pc-01 · Анна Иванова", "pc-02", "pc-03", f"pc-04 · {long_name}", "pc-05", "pc-06",
         ]
         long_caption = captions.nth(3)
         assert long_caption.get_attribute("title") == f"pc-04 · {long_name}"
+        assert long_caption.evaluate("label => getComputedStyle(label).fontSize") == "10px"
         assert long_caption.evaluate("""caption => {
             const [computer, student] = caption.children;
             return computer.scrollWidth === computer.clientWidth &&
                 student.clientWidth > 0 && student.scrollWidth > student.clientWidth &&
+                getComputedStyle(student).fontWeight === '400' &&
                 getComputedStyle(student).textOverflow === 'ellipsis' &&
                 caption.scrollWidth === caption.clientWidth;
         }""")
@@ -302,7 +353,6 @@ def check_overview_grid(context, origin, status):
         assert all(a["y"] + a["height"] < b["y"] for a, b in zip(narrow, narrow[1:]))
         page.set_viewport_size(dict(width=1366, height=768))
 
-        handle = page.get_by_role("button", name="Меню аудитории")
         assert handle.evaluate("""handle => {
             const r = handle.getBoundingClientRect();
             return r.left === 0 && r.top + r.height / 2 === innerHeight / 2;
@@ -321,29 +371,53 @@ def check_overview_grid(context, origin, status):
         assert pin.get_attribute("aria-pressed") == "true"
         assert viewport.bounding_box()["width"] < grid_width
 
-        page.get_by_role("button", name="Компьютеры").click()
-        first = page.get_by_role("checkbox", name="pc-01", exact=True)
+        computers.click()
+        assert page.locator("#choices-panel input").first.get_attribute("id") == "active-sessions-only"
+        first = page.get_by_role("checkbox", name="pc-01 Анна Иванова", exact=True)
+        page.get_by_role("checkbox", name="pc-02", exact=True).wait_for()
+        long_user = page.locator(".choice-user").filter(has_text=long_name)
+        assert long_user.get_attribute("title") == long_name
+        assert long_user.evaluate("user => user.scrollWidth > user.clientWidth")
         page.wait_for_function("previewSockets.length === 8")
+        only_sessions.check()
+        assert cards.count() == 5 and page.locator("#count").inner_text() == "Показано 5 из 6"
         first.uncheck()
-        assert cards.count() == 5
+        assert cards.count() == 4
         assert captions.first.inner_text() == "pc-02"
         assert page.evaluate("""previewSockets.every(({nodeId, ws}) =>
             nodeId === 'pc-01' ? ws.readyState >= WebSocket.CLOSING : ws.readyState === WebSocket.OPEN)""")
         page.reload()
-        page.get_by_text("Нет графической сессии").wait_for()
-        assert cards.count() == 5
+        cards.nth(3).wait_for()
+        assert cards.count() == 4
         assert pin.get_attribute("aria-pressed") == "true"
-        page.get_by_role("button", name="Компьютеры").click()
+        computers.click()
+        assert only_sessions.is_checked() and not first.is_checked()
         first.check()
         assert captions.first.text_content() == "pc-01 · Анна Иванова"
+        assert cards.count() == 5
+        sixth = cards.filter(has=page.get_by_role("heading", name="pc-06", exact=True))
+        nodes["pc-06"]["session"] = nodes["pc-02"]["session"]
+        sixth.locator(".monitor").wait_for()
         assert cards.count() == 6
+        nodes["pc-06"]["session"] = None
+        sixth.wait_for(state="detached")
+        only_sessions.uncheck()
+        assert cards.count() == 6
+        first.focus()
+        state["labels"]["pc-01"]["displayName"] = None
+        first_without_user = page.get_by_role("checkbox", name="pc-01", exact=True)
+        first_without_user.wait_for()
+        assert first_without_user.evaluate("checkbox => checkbox === document.activeElement")
         page.keyboard.press("Escape")
         assert page.locator("#choices-panel").is_hidden()
+        page.reload()
+        cards.nth(5).wait_for()
+        assert not page.locator("#active-sessions-only").is_checked()
         pin.click()
         assert viewport.bounding_box()["width"] == grid_width
         page.mouse.move(1000, 700)
         page.wait_for_function("document.getElementById('sidebar-panel').inert")
-        print("Layout fixture: compact grid, mixed outputs, narrow window, sidebar and persisted filter OK")
+        print("Layout fixture: compact grid, sidebar names, filters and automatic card updates OK")
     finally:
         page.close()
 
@@ -510,6 +584,11 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     page.goto(origin)
     grid = "document.querySelectorAll('canvas').length===2 && [...document.querySelectorAll('canvas')].every(c=>c.width>1)"
     page.wait_for_function(grid)
+    if not x11:
+        assert page.locator("#grid canvas").evaluate_all(
+            "canvases => canvases.map(canvas => [canvas.width, canvas.height])"
+        ) == [[400, 225], [127, 225]]
+        print("Preview: 400×225 landscape and 127×225 portrait decoded in Chromium")
     monitors = page.evaluate(
         "async()=> (await (await fetch('/state')).json()).nodes['pc-01'].session.monitors"
     )
@@ -524,6 +603,10 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
         page.get_by_role("heading", name=f"pc-01 · {name}" if name else "pc-01", exact=True).wait_for()
 
     check_caption("Анна Иванова")
+    thumbnail = page.get_by_role("button", name="pc-01 · Экран 1", exact=True)
+    thumbnail.hover()
+    page.wait_for_function("""() => document.querySelector('.monitor').title.endsWith(' · Экран 1')""")
+    assert thumbnail.evaluate("button => [...button.children].map(child => child.tagName)") == ["CANVAS"]
     status = page.evaluate("async()=>(await (await fetch('/state')).json()).nodes['pc-01']")
     check_overview_grid(ctx, origin, status)
     check_dense_grid(ctx, origin, status)
@@ -613,17 +696,29 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
                 "DUMMY0",
             )
         page.wait_for_function(grid)
+    page.get_by_role("button", name="Меню аудитории").hover()
+    page.get_by_role("button", name="Компьютеры", exact=True).click()
+    only_sessions = page.get_by_role("checkbox", name="Только с графической сессией")
+    only_sessions.check()
     source.terminate()
     source.wait()
-    page.wait_for_function("document.querySelectorAll('canvas').length===0")
+    page.get_by_text("Нет компьютеров с графической сессией.", exact=True).wait_for()
+    assert page.locator("#grid .seat").count() == 0
+    only_sessions.uncheck()
     page.get_by_text("Нет графической сессии").wait_for()
     page.get_by_role("heading", name="pc-01", exact=True).wait_for()
+    page.get_by_role("checkbox", name="pc-01", exact=True).wait_for()
     assert page.evaluate(
         "async()=>(await (await fetch('/state')).json()).labels['pc-01'].displayName"
     ) is None
+    only_sessions.check()
     login("Иван Петров")
     page.wait_for_function(grid)
+    assert page.locator("#grid .seat").count() == 1
+    assert page.locator("#notice").is_hidden()
     check_caption("Иван Петров")
+    if not x11:
+        page.get_by_role("checkbox", name="pc-01 Иван Петров", exact=True).wait_for()
     page.get_by_role("button", name="pc-01 · Экран 1").click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
     policy = json.loads((tmp / "policy").read_text())
@@ -635,7 +730,7 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     with sqlite3.connect(tmp / "db") as db:
         subjects = db.execute("SELECT DISTINCT subject FROM audit").fetchall()
     assert subjects == [("local",)]
-    print("T05: grid, individual monitors, track closure, logout/login, revocation OK")
+    print("T05: grid, individual monitors, track closure, logout/login with session filter, revocation OK")
 
 
 if __name__ == "__main__":
