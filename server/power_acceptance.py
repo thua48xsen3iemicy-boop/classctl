@@ -49,11 +49,15 @@ async def check_ui(origin):
             executable_path=shutil.which("chromium"), args=["--no-sandbox"],
         )
         page = await browser.new_page()
+        await page.clock.install()
         await page.goto(origin)
         await page.locator("#sidebar-handle").focus()
         await page.keyboard.press("Enter")
         await page.locator("#sidebar-pin").click()
         sidebar = page.locator("#power")
+        await expect(page.locator("#sidebar-panel button:not(#sidebar-pin)")).to_have_text([
+            "Компьютеры", "Выключить все", "Перезагрузить все",
+        ])
         menu = page.get_by_role("menu")
         shutdown = menu.get_by_role("menuitem", name="Выключить", exact=True)
         status = page.locator("#power-status")
@@ -100,6 +104,8 @@ async def check_ui(origin):
         page.once("dialog", accept)
         await shutdown.click()
         await expect(status).to_have_text("pc-02 · Команда передана системе")
+        await page.clock.fast_forward(5000)
+        await expect(status).to_be_hidden()
         await second.click(modifiers=["Control"])
         await first.click(button="right")
         await expect(menu).to_have_accessible_name("Выбрано 2 ПК")
@@ -117,8 +123,10 @@ async def check_ui(origin):
         await expect(second).to_have_count(0)
         await expect(page.locator(".seat[data-selected]")).to_have_count(1)
         page.once("dialog", accept)
-        await sidebar.get_by_role("button", name="Перезагрузить все компьютеры").click()
+        await sidebar.get_by_role("button", name="Перезагрузить все", exact=True).click()
         await expect(status).to_have_text("Команда передана системе: 2 из 2")
+        await page.clock.fast_forward(5000)
+        await expect(status).to_be_hidden()
         assert [msg.split("?")[0] for msg in dialogs] == [
             "Выключить pc-02", "Выключить pc-02", "Выключить pc-01, pc-02",
             "Перезагрузить все компьютеры аудитории (2 доступно)",

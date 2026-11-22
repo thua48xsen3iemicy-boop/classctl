@@ -391,7 +391,7 @@ const powerMessages = {
   "system-error": "Система отклонила команду",
   unconfirmed: "Выполнение команды не подтверждено",
 };
-let powerPending = false, menuTargets = [], menuTrigger;
+let powerPending = false, powerStatusTimer, menuTargets = [], menuTrigger;
 
 function renderPower() {
   const nodes = state?.powerNodes;
@@ -426,6 +426,7 @@ function formatPowerResult(outcomes) {
 async function sendPower(button, nodeIds, scope) {
   if (powerPending || !nodeIds.some((id) => state?.powerNodes?.includes(id))) return;
   if (!window.confirm(`${button.textContent} ${scope}? Несохранённые данные могут быть потеряны.`)) return;
+  clearTimeout(powerStatusTimer);
   powerPending = true;
   powerStatus.textContent = "Отправка команды…";
   renderPower();
@@ -446,13 +447,16 @@ async function sendPower(button, nodeIds, scope) {
     powerStatus.textContent = "Выполнение команды не подтверждено";
   } finally {
     powerPending = false;
+    powerStatusTimer = setTimeout(() => {
+      powerStatus.textContent = "";
+    }, 5000);
     renderPower();
   }
 }
 
 for (const button of powerButtons) button.onclick = () => {
   const nodeIds = [...(state?.powerNodes ?? [])];
-  sendPower(button, nodeIds, `аудитории (${nodeIds.length} доступно)`);
+  sendPower(button, nodeIds, `компьютеры аудитории (${nodeIds.length} доступно)`);
 };
 
 function reflectSelection(card) {
