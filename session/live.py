@@ -46,7 +46,7 @@ def display_name(uid):
 
 def outputs(fake):
     if fake:
-        rows = [("DP-1", 640, 360, 0, 0, 0), ("DP-2", 360, 640, 640, 0, 90)]
+        rows = [("DP-1", 960, 540, 0, 0, 0), ("DP-2", 360, 640, 960, 0, 90)]
     else:
         listing = subprocess.check_output(["xrandr", "--query"], text=True, timeout=2)
         rows = []
@@ -135,7 +135,7 @@ def capture_previews(monitors, fake, previous):
         image = desktop
         if len(monitors) > 1:
             image = desktop.crop((x, y, x + monitor["width"], y + monitor["height"]))
-        image.thumbnail((400, 225))
+        image.thumbnail((800, 450))
         pixels = image.size, image.tobytes()
         monitor_id = monitor["monitorId"]
         cached = previous.get(monitor_id)
@@ -143,7 +143,7 @@ def capture_previews(monitors, fake, previous):
             previews[monitor_id] = cached
             continue
         buf = io.BytesIO()
-        image.save(buf, "JPEG", quality=75)
+        image.save(buf, "JPEG", quality=80)
         data = buf.getvalue()
         previews[monitor_id] = pixels, data, hashlib.sha256(data).digest()
     return previews
@@ -282,7 +282,9 @@ class Source:
     async def frames(self):
         previews = {}
         revision = self.rev
+        next_capture = 0.0
         while True:
+            capture_due = time.monotonic() >= next_capture
             pending = []
             for key, c in list(self.channels.items()):
                 if self.channels.get(key) is not c:
@@ -294,7 +296,7 @@ class Source:
                     await self.close(key)
                     await self.ws.send_json(dict(key=key, op="ended"))
                     continue
-                if "peer" in c or c["awaiting"]:
+                if not capture_due or "peer" in c or c["awaiting"]:
                     continue
                 pending.append((key, c))
             if revision != self.rev:
@@ -308,6 +310,7 @@ class Source:
             if pending:
                 targets = {c["req"]["monitorId"] for _, c in pending}
                 monitors = [m for m in self.monitors if m["monitorId"] in targets]
+                next_capture = time.monotonic() + 0.5
                 captured = stamp()
                 previews = await asyncio.to_thread(
                     capture_previews, monitors, self.args.synthetic, previews
