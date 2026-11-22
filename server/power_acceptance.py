@@ -58,6 +58,11 @@ async def check_ui(origin):
         await expect(page.locator("#sidebar-panel button:not(#sidebar-pin)")).to_have_text([
             "Компьютеры", "Выключить все", "Перезагрузить все",
         ])
+        power_buttons = sidebar.get_by_role("button")
+        await expect(power_buttons).to_have_count(2)
+        for button in await power_buttons.all():
+            await expect(button).to_have_css("text-align", "left")
+            await expect(button).to_have_css("font-size", "12px")
         menu = page.get_by_role("menu")
         shutdown = menu.get_by_role("menuitem", name="Выключить", exact=True)
         status = page.locator("#power-status")
