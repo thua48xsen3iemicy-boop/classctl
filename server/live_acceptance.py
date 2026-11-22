@@ -319,7 +319,7 @@ def check_overview_grid(context, origin, status):
         ]
         long_caption = captions.nth(3)
         assert long_caption.get_attribute("title") == f"pc-04 · {long_name}"
-        assert long_caption.evaluate("label => getComputedStyle(label).fontSize") == "10px"
+        assert long_caption.evaluate("label => getComputedStyle(label).fontSize") == "9px"
         assert long_caption.evaluate("""caption => {
             const [computer, student] = caption.children;
             return computer.scrollWidth === computer.clientWidth &&
@@ -378,6 +378,28 @@ def check_overview_grid(context, origin, status):
         long_user = page.locator(".choice-user").filter(has_text=long_name)
         assert long_user.get_attribute("title") == long_name
         assert long_user.evaluate("user => user.scrollWidth > user.clientWidth")
+        local_style = page.add_style_tag(content="""
+            #sidebar-panel, #sidebar-panel button, #sidebar-panel h1, #sidebar-panel span,
+            #sidebar-panel label, #grid .caption, #grid .caption span {
+                font: 900 24px/2 serif !important;
+            }
+        """)
+        for selector, size, weight in (
+            ("#sidebar-panel", "10px", "400"),
+            ("#room-name", "10px", "600"),
+            ("#tab", "10px", "400"),
+            ("#sidebar-pin", "9px", "400"),
+            ("#choices-panel > label", "10px", "400"),
+            (".choice-node", "10px", "400"),
+            (".choice-user", "9px", "400"),
+            (".caption-node", "9px", "600"),
+            (".caption > span:nth-child(2)", "9px", "400"),
+        ):
+            assert page.locator(selector).first.evaluate("""element => {
+                const {fontSize, fontWeight} = getComputedStyle(element);
+                return [fontSize, fontWeight];
+            }""") == [size, weight], selector
+        local_style.evaluate("style => style.remove()")
         page.wait_for_function("previewSockets.length === 8")
         only_sessions.check()
         assert cards.count() == 5 and page.locator("#count").inner_text() == "Показано 5 из 6"

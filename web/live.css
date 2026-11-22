@@ -2,9 +2,6 @@
   box-sizing: border-box;
 }
 :root {
-  font:
-    11px/1.35 system-ui,
-    sans-serif;
   color-scheme: dark;
   --page: #10151b;
   --surface: #1a222c;
@@ -14,6 +11,24 @@
   --accent: #75dbc5;
   color: var(--text);
   background: var(--page);
+}
+@layer typography {
+  /* Layered important rules keep component styles from resetting the portal typography. */
+  :where(
+    :root, #sidebar-panel, #sidebar-panel button, .room h1, #room-name,
+    #count, #choices-panel label, .choice-node,
+    #power-menu, #power-menu button, #power-menu-label, #drawer, #drawer button
+  ) {
+    font: 400 10px/1.35 system-ui, sans-serif !important;
+  }
+  :where(.caption, .caption > span, .choice-user, .empty, #sidebar-pin) {
+    font: 400 9px/1.35 system-ui, sans-serif !important;
+  }
+  .room h1,
+  #room-name,
+  .caption > .caption-node {
+    font-weight: 600 !important;
+  }
 }
 body {
   margin: 0;
@@ -58,7 +73,6 @@ body {
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
-  font: inherit;
   cursor: pointer;
 }
 #sidebar #sidebar-handle {
@@ -71,6 +85,7 @@ body {
   padding: 0;
   border-left: 0;
   border-radius: 0 5px 5px 0;
+  font: inherit;
   font-size: 21px;
   line-height: 1;
 }
@@ -83,8 +98,6 @@ body {
 }
 .room h1 {
   margin: 0;
-  font-size: 12px;
-  font-weight: 600;
   overflow-wrap: anywhere;
 }
 #room-name {
@@ -95,7 +108,6 @@ body {
   flex: none;
   padding: 4px 6px;
   border-radius: 6px;
-  font-size: 10px;
 }
 #sidebar button:hover,
 #sidebar-pin[aria-pressed="true"],
@@ -143,7 +155,6 @@ body {
   background: transparent;
   border: 0;
   border-radius: 4px;
-  font: inherit;
   cursor: pointer;
 }
 #power-menu button:hover:not(:disabled),
@@ -215,8 +226,6 @@ body {
   display: flex;
   margin: 0;
   padding: 0 2px 2px;
-  font-size: 10px;
-  font-weight: 400;
 }
 .caption > span {
   overflow: hidden;
@@ -226,7 +235,6 @@ body {
 .caption-node {
   flex-shrink: 0;
   max-width: 100%;
-  font-weight: 600;
 }
 .outputs {
   display: grid;
@@ -270,7 +278,6 @@ button:focus-visible,
   background: #141b23;
   color: var(--muted);
   text-align: center;
-  font-size: 10px;
 }
 #focus {
   height: 100dvh;
@@ -298,7 +305,6 @@ button:focus-visible,
   padding: 12px;
 }
 #tools button {
-  font: inherit;
   cursor: pointer;
   padding: 5px 9px;
 }
@@ -311,6 +317,7 @@ button:focus-visible,
   background: #23352c;
   border: 0;
   border-radius: 0 5px 5px 0;
+  font: inherit;
   font-size: 20px;
   line-height: 1;
   padding: 10px 5px;

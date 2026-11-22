@@ -62,7 +62,8 @@ async def check_ui(origin):
         await expect(power_buttons).to_have_count(2)
         for button in await power_buttons.all():
             await expect(button).to_have_css("text-align", "left")
-            await expect(button).to_have_css("font-size", "11px")
+            await expect(button).to_have_css("font-size", "10px")
+            await expect(button).to_have_css("font-weight", "400")
         computers = page.get_by_role("button", name="Компьютеры", exact=True)
         await computers.click()
         only_sessions = page.get_by_role("checkbox", name="Только с графической сессией")
