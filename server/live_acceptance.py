@@ -561,6 +561,11 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     page.goto(origin)
     grid = "document.querySelectorAll('canvas').length===2 && [...document.querySelectorAll('canvas')].every(c=>c.width>1)"
     page.wait_for_function(grid)
+    if not x11:
+        assert page.locator("#grid canvas").evaluate_all(
+            "canvases => canvases.map(canvas => [canvas.width, canvas.height])"
+        ) == [[400, 225], [127, 225]]
+        print("Preview: 400×225 landscape and 127×225 portrait decoded in Chromium")
     monitors = page.evaluate(
         "async()=> (await (await fetch('/state')).json()).nodes['pc-01'].session.monitors"
     )
