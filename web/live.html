@@ -15,14 +15,14 @@
             <h1>Аудитория <span id="room-name"></span></h1>
             <button id="sidebar-pin" type="button" aria-pressed="false" aria-label="Закрепить панель">Закрепить</button>
           </div>
-          <section id="power" aria-label="Питание компьютеров аудитории" hidden>
-            <button type="button" data-action="system.shutdown" disabled>Выключить все компьютеры</button>
-            <button type="button" data-action="system.reboot" disabled>Перезагрузить все компьютеры</button>
-          </section>
           <button id="tab" type="button" aria-expanded="false" aria-controls="choices-panel" hidden>Компьютеры</button>
           <section id="choices-panel" hidden>
             <p id="count"></p>
             <div id="choices"></div>
+          </section>
+          <section id="power" aria-label="Питание компьютеров аудитории" hidden>
+            <button type="button" data-action="system.shutdown" disabled>Выключить все</button>
+            <button type="button" data-action="system.reboot" disabled>Перезагрузить все</button>
           </section>
         </div>
       </aside>
