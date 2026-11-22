@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>classctl</title>
+    <script src="/theme.js"></script>
     <link rel="stylesheet" href="/live.css" />
   </head>
   <body>
@@ -25,14 +26,24 @@
             <button type="button" data-action="system.shutdown" disabled><span class="power-icon" aria-hidden="true"></span>Выключить все</button>
             <button type="button" data-action="system.reboot" disabled><span class="power-icon" aria-hidden="true"></span>Перезагрузить все</button>
           </section>
+          <button id="sidebar-theme" type="button" class="rail-button theme-toggle" aria-label="Переключить тему">
+            <span class="theme-icon" aria-hidden="true"></span>
+          </button>
         </div>
       </aside>
       <div id="overview-rail">
         <span id="rail-room-name"></span>
+        <button id="rail-computers" type="button" class="rail-button" aria-label="Компьютеры" title="Компьютеры"
+          aria-controls="choices-panel" aria-expanded="false" hidden>
+          <span class="computers-icon" aria-hidden="true"></span>
+        </button>
         <div id="rail-power" role="group" aria-label="Питание компьютеров аудитории" hidden>
-          <button type="button" data-action="system.shutdown" aria-label="Выключить все" title="Выключить все" disabled><span class="power-icon" aria-hidden="true"></span></button>
-          <button type="button" data-action="system.reboot" aria-label="Перезагрузить все" title="Перезагрузить все" disabled><span class="power-icon" aria-hidden="true"></span></button>
+          <button type="button" class="rail-button" data-action="system.shutdown" aria-label="Выключить все" title="Выключить все" disabled><span class="power-icon" aria-hidden="true"></span></button>
+          <button type="button" class="rail-button" data-action="system.reboot" aria-label="Перезагрузить все" title="Перезагрузить все" disabled><span class="power-icon" aria-hidden="true"></span></button>
         </div>
+        <button id="rail-theme" type="button" class="rail-button theme-toggle" aria-label="Переключить тему">
+          <span class="theme-icon" aria-hidden="true"></span>
+        </button>
       </div>
       <div id="viewport"><main id="grid" aria-label="Рабочие места"></main></div>
       <div id="power-menu" role="menu" aria-labelledby="power-menu-label" tabindex="-1" hidden>

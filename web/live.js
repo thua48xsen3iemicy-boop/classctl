@@ -344,6 +344,7 @@ const sidebar = el("sidebar");
 const sidebarHandle = el("sidebar-handle");
 const sidebarPanel = el("sidebar-panel");
 const sidebarPin = el("sidebar-pin");
+const railComputers = el("rail-computers");
 const sidebarPinKey = "classctl.sidebarPinned";
 let sidebarPinned = false;
 
@@ -561,8 +562,14 @@ window.addEventListener("resize", () => closePowerMenu());
 function showChoices(open) {
   el("choices-panel").hidden = !open;
   el("tab").setAttribute("aria-expanded", String(open));
+  railComputers.setAttribute("aria-expanded", String(open));
 }
 el("tab").onclick = () => showChoices(el("choices-panel").hidden);
+railComputers.onclick = () => {
+  showSidebar(true);
+  showChoices(true);
+  el("tab").focus({ preventScroll: true });
+};
 const sessionFilter = el("active-sessions-only");
 const sessionFilterKey = "classctl.activeSessionsOnly.";
 sessionFilter.onchange = () => {
@@ -613,6 +620,7 @@ function renderGrid() {
   if (menuTargets.some((id) => !visibleIds.has(id))) closePowerMenu();
   updateChoices(computers, visible);
   el("tab").hidden = !computers.length;
+  railComputers.hidden = !computers.length;
   if (!computers.length) showChoices(false);
   const notice = el("notice");
   const hiddenMessage = "Все компьютеры скрыты. Выберите нужные в панели «Компьютеры».";
@@ -767,6 +775,7 @@ async function poll() {
     renderPower();
     showChoices(false);
     el("tab").hidden = true;
+    railComputers.hidden = true;
     closeFocus();
     clearGrid();
     showRoomName("");

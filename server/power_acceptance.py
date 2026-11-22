@@ -50,22 +50,41 @@ async def check_ui(origin):
         )
         page = await browser.new_page()
         await page.clock.install()
+        await page.emulate_media(color_scheme="light")
         await page.goto(origin)
         rail = page.locator("#overview-rail")
+        root = page.locator("html")
         await expect(rail.locator("#rail-room-name")).to_have_text("lab-a")
         await expect(rail.get_by_role("button", name="Выключить все", exact=True)).to_be_enabled()
         await expect(rail.get_by_role("button", name="Перезагрузить все", exact=True)).to_be_enabled()
         assert await rail.evaluate("""rail => {
             const handle = document.querySelector('#sidebar-handle');
             const viewport = document.querySelector('#viewport');
-            return rail.offsetWidth === handle.offsetWidth && viewport.offsetLeft === rail.offsetWidth;
+            const theme = rail.querySelector('#rail-theme');
+            return rail.offsetWidth === handle.offsetWidth && viewport.offsetLeft === rail.offsetWidth
+                && rail.querySelector('button').id === 'rail-computers'
+                && theme.getBoundingClientRect().bottom === rail.getBoundingClientRect().bottom - 6;
         }""")
-        await page.locator("#sidebar-handle").focus()
-        await page.keyboard.press("Enter")
+        await expect(root).to_have_css("background-color", "rgb(243, 246, 248)")
+        assert await page.evaluate("localStorage.getItem('classctl.theme')") is None
+        await page.emulate_media(color_scheme="dark")
+        await expect(root).to_have_css("background-color", "rgb(16, 21, 27)")
+        await rail.get_by_role("button", name="Включить светлую тему").click()
+        await expect(root).to_have_css("background-color", "rgb(243, 246, 248)")
+        await page.reload()
+        await expect(root).to_have_css("background-color", "rgb(243, 246, 248)")
+
+        await rail.get_by_role("button", name="Компьютеры", exact=True).click()
+        await expect(page.locator("#choices-panel")).to_be_visible()
+        computers = page.locator("#tab")
+        await expect(computers).to_have_attribute("aria-expanded", "true")
         await page.locator("#sidebar-pin").click()
         await expect(rail).to_be_hidden()
+        await page.get_by_role("button", name="Включить тёмную тему").click()
+        await expect(root).to_have_css("background-color", "rgb(16, 21, 27)")
+        assert await page.evaluate("localStorage.getItem('classctl.theme')") == "dark"
         sidebar = page.locator("#power")
-        await expect(page.locator("#sidebar-panel button:not(#sidebar-pin)")).to_have_text([
+        await expect(page.locator("#sidebar-panel button:not(#sidebar-pin, .theme-toggle)")).to_have_text([
             "Компьютеры", "Выключить все", "Перезагрузить все",
         ])
         power_buttons = sidebar.get_by_role("button")
@@ -74,8 +93,6 @@ async def check_ui(origin):
             await expect(button).to_have_css("text-align", "left")
             await expect(button).to_have_css("font-size", "10px")
             await expect(button).to_have_css("font-weight", "400")
-        computers = page.get_by_role("button", name="Компьютеры", exact=True)
-        await computers.click()
         only_sessions = page.get_by_role("checkbox", name="Только с графической сессией")
         await expect(only_sessions).to_be_checked()
         await expect(page.locator(".seat")).to_have_count(0)
