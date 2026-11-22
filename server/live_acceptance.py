@@ -300,19 +300,31 @@ def check_overview_grid(context, origin, status):
     """)
     try:
         page.goto(origin)
-        page.get_by_text("Нет графической сессии").wait_for()
         cards = page.locator(".seat")
+        cards.nth(4).wait_for()
+        assert cards.count() == 5
+        handle = page.get_by_role("button", name="Меню аудитории")
+        computers = page.get_by_role("button", name="Компьютеры", exact=True)
+        only_sessions = page.get_by_role("checkbox", name="Только с графической сессией")
+        handle.hover()
+        computers.click()
+        assert only_sessions.is_checked()
+        only_sessions.uncheck()
+        computers.click()
+        page.mouse.move(1000, 700)
+        page.get_by_text("Нет графической сессии").wait_for()
         captions = cards.locator(".caption")
         assert captions.all_text_contents() == [
             "pc-01 · Анна Иванова", "pc-02", "pc-03", f"pc-04 · {long_name}", "pc-05", "pc-06",
         ]
         long_caption = captions.nth(3)
         assert long_caption.get_attribute("title") == f"pc-04 · {long_name}"
-        assert long_caption.evaluate("label => getComputedStyle(label).fontSize") == "11px"
+        assert long_caption.evaluate("label => getComputedStyle(label).fontSize") == "10px"
         assert long_caption.evaluate("""caption => {
             const [computer, student] = caption.children;
             return computer.scrollWidth === computer.clientWidth &&
                 student.clientWidth > 0 && student.scrollWidth > student.clientWidth &&
+                getComputedStyle(student).fontWeight === '400' &&
                 getComputedStyle(student).textOverflow === 'ellipsis' &&
                 caption.scrollWidth === caption.clientWidth;
         }""")
@@ -341,7 +353,6 @@ def check_overview_grid(context, origin, status):
         assert all(a["y"] + a["height"] < b["y"] for a, b in zip(narrow, narrow[1:]))
         page.set_viewport_size(dict(width=1366, height=768))
 
-        handle = page.get_by_role("button", name="Меню аудитории")
         assert handle.evaluate("""handle => {
             const r = handle.getBoundingClientRect();
             return r.left === 0 && r.top + r.height / 2 === innerHeight / 2;
@@ -360,8 +371,7 @@ def check_overview_grid(context, origin, status):
         assert pin.get_attribute("aria-pressed") == "true"
         assert viewport.bounding_box()["width"] < grid_width
 
-        page.get_by_role("button", name="Компьютеры").click()
-        only_sessions = page.get_by_role("checkbox", name="Только с графической сессией")
+        computers.click()
         assert page.locator("#choices-panel input").first.get_attribute("id") == "active-sessions-only"
         first = page.get_by_role("checkbox", name="pc-01 Анна Иванова", exact=True)
         page.get_by_role("checkbox", name="pc-02", exact=True).wait_for()
@@ -380,7 +390,7 @@ def check_overview_grid(context, origin, status):
         cards.nth(3).wait_for()
         assert cards.count() == 4
         assert pin.get_attribute("aria-pressed") == "true"
-        page.get_by_role("button", name="Компьютеры").click()
+        computers.click()
         assert only_sessions.is_checked() and not first.is_checked()
         first.check()
         assert captions.first.text_content() == "pc-01 · Анна Иванова"
@@ -400,6 +410,9 @@ def check_overview_grid(context, origin, status):
         assert first_without_user.evaluate("checkbox => checkbox === document.activeElement")
         page.keyboard.press("Escape")
         assert page.locator("#choices-panel").is_hidden()
+        page.reload()
+        cards.nth(5).wait_for()
+        assert not page.locator("#active-sessions-only").is_checked()
         pin.click()
         assert viewport.bounding_box()["width"] == grid_width
         page.mouse.move(1000, 700)
