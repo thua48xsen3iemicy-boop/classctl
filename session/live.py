@@ -133,7 +133,7 @@ def capture_previews(monitors, fake, previous):
         image = desktop
         if len(monitors) > 1:
             image = desktop.crop((x, y, x + monitor["width"], y + monitor["height"]))
-        image.thumbnail((320, 180))
+        image.thumbnail((400, 225))
         pixels = image.size, image.tobytes()
         monitor_id = monitor["monitorId"]
         cached = previous.get(monitor_id)
@@ -353,7 +353,7 @@ class Source:
                     await self.ws.send_bytes(
                         key.encode() + len(header).to_bytes(4, "big") + header + data
                     )
-            await asyncio.sleep(0.12)
+            await asyncio.sleep(0.17)
 
     async def listen(self):
         async for msg in self.ws:

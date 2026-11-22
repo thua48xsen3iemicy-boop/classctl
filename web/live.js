@@ -331,6 +331,7 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
   };
 }
 let hidden = new Set(), choiceSignature, storageKey;
+const choiceUsers = new Map();
 const sidebar = el("sidebar");
 const sidebarHandle = el("sidebar-handle");
 const sidebarPanel = el("sidebar-panel");
@@ -698,6 +699,7 @@ function updateChoices(seats, visible) {
   const next = JSON.stringify([storageKey, seats]);
   if (next !== choiceSignature) {
     el("choices").replaceChildren();
+    choiceUsers.clear();
     for (const seat of seats) {
       const label = document.createElement("label");
       const check = document.createElement("input");
@@ -709,10 +711,23 @@ function updateChoices(seats, visible) {
         try { localStorage.setItem(storageKey, JSON.stringify([...hidden])); } catch {}
         renderGrid();
       };
-      label.append(check, seat.nodeId);
+      const computer = document.createElement("span");
+      computer.className = "choice-node";
+      computer.textContent = seat.nodeId;
+      computer.title = seat.nodeId;
+      const user = document.createElement("span");
+      user.className = "choice-user";
+      label.append(check, computer, user);
       el("choices").append(label);
+      choiceUsers.set(seat.nodeId, user);
     }
     choiceSignature = next;
+  }
+  for (const [nodeId, user] of choiceUsers) {
+    const name = state.labels?.[nodeId]?.displayName ?? "";
+    if (user.textContent === name) continue;
+    user.textContent = name;
+    user.title = name;
   }
   el("count").textContent = "Показано " + visible.length + " из " + seats.length;
 }

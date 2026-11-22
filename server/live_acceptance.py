@@ -308,6 +308,7 @@ def check_overview_grid(context, origin, status):
         ]
         long_caption = captions.nth(3)
         assert long_caption.get_attribute("title") == f"pc-04 · {long_name}"
+        assert long_caption.evaluate("label => getComputedStyle(label).fontSize") == "11px"
         assert long_caption.evaluate("""caption => {
             const [computer, student] = caption.children;
             return computer.scrollWidth === computer.clientWidth &&
@@ -362,7 +363,11 @@ def check_overview_grid(context, origin, status):
         page.get_by_role("button", name="Компьютеры").click()
         only_sessions = page.get_by_role("checkbox", name="Только с графической сессией")
         assert page.locator("#choices-panel input").first.get_attribute("id") == "active-sessions-only"
-        first = page.get_by_role("checkbox", name="pc-01", exact=True)
+        first = page.get_by_role("checkbox", name="pc-01 Анна Иванова", exact=True)
+        page.get_by_role("checkbox", name="pc-02", exact=True).wait_for()
+        long_user = page.locator(".choice-user").filter(has_text=long_name)
+        assert long_user.get_attribute("title") == long_name
+        assert long_user.evaluate("user => user.scrollWidth > user.clientWidth")
         page.wait_for_function("previewSockets.length === 8")
         only_sessions.check()
         assert cards.count() == 5 and page.locator("#count").inner_text() == "Показано 5 из 6"
@@ -388,13 +393,18 @@ def check_overview_grid(context, origin, status):
         sixth.wait_for(state="detached")
         only_sessions.uncheck()
         assert cards.count() == 6
+        first.focus()
+        state["labels"]["pc-01"]["displayName"] = None
+        first_without_user = page.get_by_role("checkbox", name="pc-01", exact=True)
+        first_without_user.wait_for()
+        assert first_without_user.evaluate("checkbox => checkbox === document.activeElement")
         page.keyboard.press("Escape")
         assert page.locator("#choices-panel").is_hidden()
         pin.click()
         assert viewport.bounding_box()["width"] == grid_width
         page.mouse.move(1000, 700)
         page.wait_for_function("document.getElementById('sidebar-panel').inert")
-        print("Layout fixture: compact grid, sidebar, persisted filters and automatic card updates OK")
+        print("Layout fixture: compact grid, sidebar names, filters and automatic card updates OK")
     finally:
         page.close()
 
@@ -561,6 +571,11 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     page.goto(origin)
     grid = "document.querySelectorAll('canvas').length===2 && [...document.querySelectorAll('canvas')].every(c=>c.width>1)"
     page.wait_for_function(grid)
+    if not x11:
+        assert page.locator("#grid canvas").evaluate_all(
+            "canvases => canvases.map(canvas => [canvas.width, canvas.height])"
+        ) == [[400, 225], [127, 225]]
+        print("Preview: 400×225 landscape and 127×225 portrait decoded in Chromium")
     monitors = page.evaluate(
         "async()=> (await (await fetch('/state')).json()).nodes['pc-01'].session.monitors"
     )
@@ -679,6 +694,7 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     only_sessions.uncheck()
     page.get_by_text("Нет графической сессии").wait_for()
     page.get_by_role("heading", name="pc-01", exact=True).wait_for()
+    page.get_by_role("checkbox", name="pc-01", exact=True).wait_for()
     assert page.evaluate(
         "async()=>(await (await fetch('/state')).json()).labels['pc-01'].displayName"
     ) is None
@@ -688,6 +704,8 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     assert page.locator("#grid .seat").count() == 1
     assert page.locator("#notice").is_hidden()
     check_caption("Иван Петров")
+    if not x11:
+        page.get_by_role("checkbox", name="pc-01 Иван Петров", exact=True).wait_for()
     page.get_by_role("button", name="pc-01 · Экран 1").click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
     policy = json.loads((tmp / "policy").read_text())
