@@ -327,20 +327,33 @@ def check_overview_grid(context, origin, status):
         assert viewport.bounding_box()["width"] < grid_width
 
         page.get_by_role("button", name="Компьютеры").click()
+        only_sessions = page.get_by_role("checkbox", name="Только с графической сессией")
+        assert page.locator("#choices-panel input").first.get_attribute("id") == "active-sessions-only"
         first = page.get_by_role("checkbox", name="pc-01", exact=True)
         page.wait_for_function("previewSockets.length === 8")
+        only_sessions.check()
+        assert cards.count() == 5 and page.locator("#count").inner_text() == "Показано 5 из 6"
         first.uncheck()
-        assert cards.count() == 5
+        assert cards.count() == 4
         assert captions.first.inner_text() == "pc-02"
         assert page.evaluate("""previewSockets.every(({nodeId, ws}) =>
             nodeId === 'pc-01' ? ws.readyState >= WebSocket.CLOSING : ws.readyState === WebSocket.OPEN)""")
         page.reload()
-        page.get_by_text("Нет графической сессии").wait_for()
-        assert cards.count() == 5
+        cards.nth(3).wait_for()
+        assert cards.count() == 4
         assert pin.get_attribute("aria-pressed") == "true"
         page.get_by_role("button", name="Компьютеры").click()
+        assert only_sessions.is_checked() and not first.is_checked()
         first.check()
         assert captions.first.text_content() == "pc-01 · Анна Иванова"
+        assert cards.count() == 5
+        sixth = cards.filter(has=page.get_by_role("heading", name="pc-06", exact=True))
+        nodes["pc-06"]["session"] = nodes["pc-02"]["session"]
+        sixth.locator(".monitor").wait_for()
+        assert cards.count() == 6
+        nodes["pc-06"]["session"] = None
+        sixth.wait_for(state="detached")
+        only_sessions.uncheck()
         assert cards.count() == 6
         page.keyboard.press("Escape")
         assert page.locator("#choices-panel").is_hidden()
@@ -348,7 +361,7 @@ def check_overview_grid(context, origin, status):
         assert viewport.bounding_box()["width"] == grid_width
         page.mouse.move(1000, 700)
         page.wait_for_function("document.getElementById('sidebar-panel').inert")
-        print("Layout fixture: compact grid, mixed outputs, narrow window, sidebar and persisted filter OK")
+        print("Layout fixture: compact grid, sidebar, persisted filters and automatic card updates OK")
     finally:
         page.close()
 
@@ -618,16 +631,25 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
                 "DUMMY0",
             )
         page.wait_for_function(grid)
+    page.get_by_role("button", name="Меню аудитории").hover()
+    page.get_by_role("button", name="Компьютеры", exact=True).click()
+    only_sessions = page.get_by_role("checkbox", name="Только с графической сессией")
+    only_sessions.check()
     source.terminate()
     source.wait()
-    page.wait_for_function("document.querySelectorAll('canvas').length===0")
+    page.get_by_text("Нет компьютеров с графической сессией.", exact=True).wait_for()
+    assert page.locator("#grid .seat").count() == 0
+    only_sessions.uncheck()
     page.get_by_text("Нет графической сессии").wait_for()
     page.get_by_role("heading", name="pc-01", exact=True).wait_for()
     assert page.evaluate(
         "async()=>(await (await fetch('/state')).json()).labels['pc-01'].displayName"
     ) is None
+    only_sessions.check()
     login("Иван Петров")
     page.wait_for_function(grid)
+    assert page.locator("#grid .seat").count() == 1
+    assert page.locator("#notice").is_hidden()
     check_caption("Иван Петров")
     page.get_by_role("button", name="pc-01 · Экран 1").click()
     page.wait_for_function("document.querySelector('video')?.readyState>=2")
@@ -640,7 +662,7 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     with sqlite3.connect(tmp / "db") as db:
         subjects = db.execute("SELECT DISTINCT subject FROM audit").fetchall()
     assert subjects == [("local",)]
-    print("T05: grid, individual monitors, track closure, logout/login, revocation OK")
+    print("T05: grid, individual monitors, track closure, logout/login with session filter, revocation OK")
 
 
 if __name__ == "__main__":
