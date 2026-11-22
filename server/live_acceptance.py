@@ -201,6 +201,9 @@ def check_dense_grid(context, origin, status):
         assert page.evaluate(
             "!document.fullscreenElement && document.querySelector('#drawer').inert"
         )
+        assert page.get_by_role("dialog").is_visible()
+        assert page.locator("#overview").evaluate("overview => overview.inert && !overview.hidden")
+        assert page.locator("#grid canvas").count() == 50
         handle = page.locator("#handle")
         assert handle.evaluate("""handle => {
             const r = handle.getBoundingClientRect();
@@ -319,7 +322,7 @@ def check_overview_grid(context, origin, status):
         ]
         long_caption = captions.nth(3)
         assert long_caption.get_attribute("title") == f"pc-04 · {long_name}"
-        assert long_caption.evaluate("label => getComputedStyle(label).fontSize") == "10px"
+        assert long_caption.evaluate("label => getComputedStyle(label).fontSize") == "9px"
         assert long_caption.evaluate("""caption => {
             const [computer, student] = caption.children;
             return computer.scrollWidth === computer.clientWidth &&
@@ -353,7 +356,8 @@ def check_overview_grid(context, origin, status):
         assert all(a["y"] + a["height"] < b["y"] for a, b in zip(narrow, narrow[1:]))
         page.set_viewport_size(dict(width=1366, height=768))
 
-        assert handle.evaluate("""handle => {
+        page.wait_for_function("""() => {
+            const handle = document.querySelector('#sidebar-handle');
             const r = handle.getBoundingClientRect();
             return r.left === 0 && r.top + r.height / 2 === innerHeight / 2;
         }""")
@@ -378,6 +382,28 @@ def check_overview_grid(context, origin, status):
         long_user = page.locator(".choice-user").filter(has_text=long_name)
         assert long_user.get_attribute("title") == long_name
         assert long_user.evaluate("user => user.scrollWidth > user.clientWidth")
+        local_style = page.add_style_tag(content="""
+            #sidebar-panel, #sidebar-panel button, #sidebar-panel h1, #sidebar-panel span,
+            #sidebar-panel label, #grid .caption, #grid .caption span {
+                font: 900 24px/2 serif !important;
+            }
+        """)
+        for selector, size, weight in (
+            ("#sidebar-panel", "10px", "400"),
+            ("#room-name", "10px", "600"),
+            ("#tab", "10px", "400"),
+            ("#sidebar-pin", "9px", "400"),
+            ("#choices-panel > label", "10px", "400"),
+            (".choice-node", "10px", "400"),
+            (".choice-user", "9px", "400"),
+            (".caption-node", "9px", "600"),
+            (".caption > span:nth-child(2)", "9px", "400"),
+        ):
+            assert page.locator(selector).first.evaluate("""element => {
+                const {fontSize, fontWeight} = getComputedStyle(element);
+                return [fontSize, fontWeight];
+            }""") == [size, weight], selector
+        local_style.evaluate("style => style.remove()")
         page.wait_for_function("previewSockets.length === 8")
         only_sessions.check()
         assert cards.count() == 5 and page.locator("#count").inner_text() == "Показано 5 из 6"
@@ -611,6 +637,17 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     check_overview_grid(ctx, origin, status)
     check_dense_grid(ctx, origin, status)
     first, second = monitors
+    page.wait_for_function(grid)
+    page.evaluate("""() => {
+        window.gridCanvases = [...document.querySelectorAll('#grid canvas')];
+        window.gridSockets = sockets.filter(ws => ws.readyState === WebSocket.OPEN);
+    }""")
+    kept_previews = """() => {
+        const canvases = [...document.querySelectorAll('#grid canvas')];
+        return canvases.length === gridCanvases.length && gridSockets.length === 2
+            && canvases.every((canvas, index) => canvas === gridCanvases[index] && canvas.width > 1)
+            && gridSockets.every(ws => ws.readyState === WebSocket.OPEN);
+    }"""
 
     def wait_for_video(monitor):
         page.wait_for_function(
@@ -620,7 +657,8 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
 
     for index, monitor in enumerate((first, second), 1):
         label = "pc-01 · " + monitor["monitorId"]
-        page.get_by_role("button", name=f"pc-01 · Экран {index}").click()
+        thumbnail = page.get_by_role("button", name=f"pc-01 · Экран {index}", exact=True)
+        thumbnail.click()
         wait_for_video(monitor)
         print(
             label,
@@ -633,6 +671,8 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
         page.wait_for_function(
             "document.fullscreenElement===document.querySelector('#focus')"
         )
+        assert page.evaluate(kept_previews)
+        assert page.locator("#overview").evaluate("overview => overview.inert && !overview.hidden")
         if monitor is first:
             page.locator("#handle").hover()
             swap = page.get_by_role("button", name="Другой монитор")
@@ -642,13 +682,20 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
                 assert page.locator("#target").inner_text() == "pc-01 · " + target["monitorId"]
                 assert page.evaluate("""() =>
                     document.fullscreenElement === document.querySelector('#focus') &&
-                    pcs.at(-2).connectionState === 'closed' &&
-                    !document.querySelector('#grid canvas')""")
+                    pcs.at(-2).connectionState === 'closed'""")
+                assert page.evaluate(kept_previews)
             page.keyboard.press("Escape")
         else:
             page.locator("#handle").hover()
             page.get_by_text("← В аудиторию").click()
         assert page.evaluate("pcs.at(-1).connectionState==='closed'")
+        assert page.evaluate(kept_previews)
+        assert not page.locator("#overview").evaluate("overview => overview.inert")
+        page.wait_for_function(
+            "label => document.activeElement.getAttribute('aria-label') === label",
+            arg=f"pc-01 · Экран {index}",
+            timeout=5000,
+        )
     if "--dummy-layout" in sys.argv:
         if [first["monitorId"], second["monitorId"]] != ["DUMMY0", "DUMMY1"]:
             raise ValueError("Use only the disposable Xorg dummy display")
@@ -730,7 +777,7 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     with sqlite3.connect(tmp / "db") as db:
         subjects = db.execute("SELECT DISTINCT subject FROM audit").fetchall()
     assert subjects == [("local",)]
-    print("T05: grid, individual monitors, track closure, logout/login with session filter, revocation OK")
+    print("T05: grid retains previews through fullscreen, with monitor switching, track closure and revocation OK")
 
 
 if __name__ == "__main__":
