@@ -38,6 +38,10 @@ def exercise(page, tmp, monitor):
     rooms["lab-a"].append("control")
     policy.write_text(json.dumps(config))
     page.wait_for_timeout(800)
+    second_screen.click(button="middle")
+    page.get_by_text("Режим просмотра", exact=True).wait_for()
+    page.locator("video").click(button="right")
+    page.locator("#focus").wait_for(state="hidden")
     second_screen.click()
     page.wait_for_function(
         "document.querySelector('#mode').textContent==='Управление включено'"
@@ -76,9 +80,23 @@ def exercise(page, tmp, monitor):
         const rect={left:0,top:0,width:1000,height:1000};
         return f(rect,1920,1080,10,10)===null && f(rect,1920,1080,0,218.75).u===0 &&
                f(rect,1080,1920,500,500).v===.5 && f(rect,1080,1920,999,500)===null}""")
-    # xev translates the injected physical key through the active XKB layout.
-    win = root.create_window(0, 0, 100, 100, 0, d.screen().root_depth)
+    page.mouse.down(button="right")
+    wait(lambda: root.query_pointer().mask & X.Button3Mask)
+    page.mouse.up(button="right")
+    wait(lambda: not root.query_pointer().mask & X.Button3Mask)
+    pointer = root.query_pointer()
+    win = root.create_window(
+        pointer.root_x - 50, pointer.root_y - 50, 100, 100, 0,
+        d.screen().root_depth, event_mask=X.ButtonPressMask,
+    )
     win.map()
+    d.sync()
+    page.mouse.wheel(0, 120)
+    wait(d.pending_events)
+    scroll = d.next_event()
+    assert scroll.type == X.ButtonPress and scroll.detail == 5
+    assert page.locator("#target").inner_text() == "pc-01 · " + monitor["monitorId"]
+    # xev translates the injected physical key through the active XKB layout.
     win.set_input_focus(X.RevertToParent, X.CurrentTime)
     d.sync()
     saved = tmp / "saved.xkb"

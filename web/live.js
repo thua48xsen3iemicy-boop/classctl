@@ -140,9 +140,10 @@ function signature(seat) {
     state.wheelNodes?.includes(seat.nodeId),
   ]);
 }
-function openView(seat, id, trigger) {
+function openView(seat, id, trigger, requestedMode = "control") {
+  const mode = state.controlNodes?.includes(seat.nodeId) ? requestedMode : "view";
   const view = {
-    seat, trigger, signature: signature(seat),
+    seat, trigger, mode, signature: signature(seat),
     scrollTop: viewport.scrollTop,
   };
   closePowerMenu();
@@ -163,16 +164,16 @@ function openView(seat, id, trigger) {
   el("handle").focus({ preventScroll: true });
 }
 function connectMonitor(view, id) {
-  const { seat } = view;
+  const { seat, mode } = view;
   const binding = state.nodes[seat.nodeId];
-  const control = state.controlNodes?.includes(seat.nodeId) ?? false;
+  const control = mode === "control";
   const ws = socket(control);
   const peer = new RTCPeerConnection({ iceServers: state.iceServers });
   const video = document.createElement("video");
   const active = { ws, peer, video, id };
   const isCurrent = () => focus === view && view.connection === active;
   view.connection = active;
-  el("swap").hidden = binding.session.monitors.length !== 2;
+  el("swap").hidden = binding.session.monitors.length < 2;
   el("swap").removeAttribute("aria-disabled");
   el("target").textContent = seat.nodeId + " · " + id;
   el("mode").textContent = "Подключение…";
@@ -182,7 +183,7 @@ function connectMonitor(view, id) {
     nodeId: binding.nodeId,
     sessionId: binding.session.sessionId,
     layoutRevision: binding.session.layoutRevision,
-    mode: control ? "control" : "view",
+    mode,
     target: { scope: "monitor", monitorId: id },
   };
   video.autoplay = true;
@@ -234,13 +235,14 @@ function connectMonitor(view, id) {
     }
   };
 }
-el("swap").onclick = async () => {
+async function switchMonitor(step) {
   const view = focus;
   const current = view?.connection;
   if (!current) return;
   const monitors = state.nodes[view.seat.nodeId].session.monitors;
-  if (monitors.length !== 2) return;
-  const other = monitors.find((monitor) => monitor.monitorId !== current.id);
+  if (monitors.length < 2) return;
+  const index = monitors.findIndex((monitor) => monitor.monitorId === current.id);
+  const next = monitors[(index + step + monitors.length) % monitors.length];
   view.connection = null;
   el("swap").setAttribute("aria-disabled", "true");
   el("mode").textContent = "Подключение…";
@@ -250,8 +252,23 @@ el("swap").onclick = async () => {
   );
   closeConnection(current);
   await closed;
-  if (focus === view) connectMonitor(view, other.monitorId);
-};
+  if (focus === view) connectMonitor(view, next.monitorId);
+}
+el("swap").onclick = () => switchMonitor(1);
+monitorView.addEventListener("contextmenu", (event) => {
+  if (focus?.mode !== "view" || event.button !== 2) return;
+  event.preventDefault();
+  back();
+});
+monitorView.addEventListener(
+  "wheel",
+  (event) => {
+    if (focus?.mode !== "view" || !event.deltaY) return;
+    event.preventDefault();
+    switchMonitor(Math.sign(event.deltaY));
+  },
+  { passive: false },
+);
 function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
   const request = {
     version: 1,
@@ -280,6 +297,14 @@ function preview(seat, binding, m, name, identity, outputs, onDisconnect) {
   panel.type = "button";
   panel.setAttribute("aria-label", seat.nodeId + " · " + name);
   panel.onclick = () => openView(seat, m.monitorId, panel);
+  panel.addEventListener("mousedown", (event) => {
+    if (event.button === 1) event.preventDefault();
+  });
+  panel.addEventListener("auxclick", (event) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    openView(seat, m.monitorId, panel, "view");
+  });
   outputs.append(panel);
   let verified = 0,
     cancelled = false;

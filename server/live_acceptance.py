@@ -98,14 +98,33 @@ def check_nextcloud_embedding(browser, tmp, origin, grid):
         frame = page.frame(url=origin + "/")
         assert frame is not None, messages
         frame.wait_for_function(grid)
-        frame.get_by_role("button", name="pc-01 · Экран 1", exact=True).click()
+        frame.evaluate("window.previews = [...document.querySelectorAll('#grid canvas')]")
+        frame.get_by_role("button", name="pc-01 · Экран 1", exact=True).click(button="middle")
         page.wait_for_function("document.fullscreenElement === document.querySelector('iframe')")
         frame.wait_for_function("document.fullscreenElement === document.querySelector('#focus')")
-        frame.wait_for_function("document.querySelector('video')?.readyState >= 2")
+        frame.get_by_text("Режим просмотра", exact=True).wait_for()
+        first = frame.locator("#target").inner_text()
+        video = frame.locator("video")
+        video.hover()
+        page.mouse.wheel(0, 120)
+        frame.wait_for_function(
+            "first => document.querySelector('#target').textContent !== first && "
+            "document.querySelector('video')?.readyState >= 2",
+            arg=first,
+        )
+        frame.get_by_text("Режим просмотра", exact=True).wait_for()
+        video.click(button="right")
+        page.wait_for_function("!document.fullscreenElement")
+        frame.locator("#focus").wait_for(state="hidden")
+        frame.wait_for_function(grid)
+        assert frame.evaluate(
+            "[...document.querySelectorAll('#grid canvas')].every((canvas, i) => "
+            "canvas === previews[i] && canvas.width > 1)"
+        )
 
         set_origin(None)
         blocked(allowed, "frame-ancestors 'none'")
-    print("T17: HTTPS parent embeds loopback HTTP, receives previews and opens fullscreen video; other origins blocked")
+    print("T17/T18: embedding, middle click, switching and right-click return work in fullscreen")
 
 
 async def check_listeners(tmp, origin, agent_origin, contexts):
@@ -185,6 +204,16 @@ def check_dense_grid(context, origin, status):
     def stream(ws):
         ws.on_message(lambda message: requests.append(json.loads(message)))
 
+    def wait_for_accesses(count):
+        for _ in range(100):
+            accesses = [
+                m["request"] for m in requests if m.get("request", {}).get("kind") == "access"
+            ]
+            if len(accesses) >= count:
+                return accesses
+            page.wait_for_timeout(50)
+        raise AssertionError(f"Expected {count} monitor requests, got {accesses}")
+
     page.route_web_socket("**/stream", stream)
     # Simulate a managed browser that rejects the fullscreen request.
     page.add_init_script(
@@ -261,13 +290,7 @@ def check_dense_grid(context, origin, status):
         assert page.locator('[data-node-id="pc-25"][data-selected]').count() == 1
         assert not page.locator("#focus").is_visible()
         preview.click()
-        for _ in range(100):
-            if any(m.get("request", {}).get("kind") == "access" for m in requests):
-                break
-            page.wait_for_timeout(50)
-        access = next(
-            m["request"] for m in requests if m["request"]["kind"] == "access"
-        )
+        access = wait_for_accesses(1)[0]
         assert access["nodeId"] == "pc-25" and access["mode"] == "control"
         assert access["target"] == {"scope": "monitor", "monitorId": monitor}
         assert page.evaluate("""()=>{const r=document.querySelector('video').getBoundingClientRect();
@@ -278,6 +301,11 @@ def check_dense_grid(context, origin, status):
         assert page.get_by_role("dialog").is_visible()
         assert page.locator("#overview").evaluate("overview => overview.inert && !overview.hidden")
         assert page.locator("#grid canvas").count() == 50
+        video = page.locator("video")
+        video.click(button="right")
+        page.mouse.wheel(0, 120)
+        assert video.is_visible()
+        assert page.locator("#target").inner_text() == f"pc-25 · {monitor}"
         handle = page.locator("#handle")
         assert handle.evaluate("""handle => {
             const r = handle.getBoundingClientRect();
@@ -286,12 +314,7 @@ def check_dense_grid(context, origin, status):
         handle.hover()
         page.wait_for_function("!document.querySelector('#drawer').inert")
         page.get_by_role("button", name="Другой монитор").click()
-        for _ in range(100):
-            access_requests = [m["request"] for m in requests if m["request"]["kind"] == "access"]
-            if len(access_requests) == 2:
-                break
-            page.wait_for_timeout(50)
-        assert access_requests[1] == {
+        assert wait_for_accesses(2)[1] == {
             **access,
             "target": {"scope": "monitor", "monitorId": status["session"]["monitors"][0]["monitorId"]},
         }
@@ -319,19 +342,45 @@ def check_dense_grid(context, origin, status):
         page.get_by_role("button", name="← В аудиторию").click()
         page.wait_for_function("document.querySelectorAll('.monitor').length===50")
         state["room"]["seats"] = seats[:1]
+        first, second = status["session"]["monitors"]
+        third = {**first, "monitorId": "third", "x": second["x"] + second["width"]}
         nodes["pc-01"]["session"] = {
             **status["session"],
-            "monitors": status["session"]["monitors"][:1],
+            "monitors": [first, second, third],
+        }
+        preview = page.get_by_role("button", name="pc-01 · Экран 2", exact=True)
+        page.get_by_role("button", name="pc-01 · Экран 3", exact=True).wait_for()
+        preview.click(button="middle")
+        for count, (delta, expected) in enumerate(
+            [(0, second), (120, third), (120, first), (-120, third), (-120, second)], 3
+        ):
+            if delta:
+                video.hover()
+                page.mouse.wheel(0, delta)
+            request = wait_for_accesses(count)[-1]
+            assert request["nodeId"] == "pc-01" and request["mode"] == "view"
+            assert request["target"] == {"scope": "monitor", "monitorId": expected["monitorId"]}
+        video.click(button="right")
+        page.locator("#focus").wait_for(state="hidden")
+        page.wait_for_function("document.activeElement.getAttribute('aria-label') === 'pc-01 · Экран 2'")
+
+        nodes["pc-01"]["session"] = {
+            **status["session"],
+            "monitors": [first],
         }
         page.wait_for_function("document.querySelectorAll('.monitor').length===1")
         page.evaluate(
             "Element.prototype.requestFullscreen=window.nativeFullscreen;void 0"
         )
-        page.locator(".monitor").click()
+        page.locator(".monitor").click(button="middle")
         page.wait_for_function(
             "document.fullscreenElement===document.querySelector('#focus')"
         )
         assert page.locator("#swap").evaluate("button => button.hidden")
+        wait_for_accesses(8)
+        video.hover()
+        page.mouse.wheel(0, 120)
+        assert page.locator("#target").inner_text() == f"pc-01 · {first['monitorId']}"
         page.evaluate("document.exitFullscreen()")
         page.wait_for_function(
             "document.querySelector('.monitor') && document.querySelector('#focus').hidden"
