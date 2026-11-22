@@ -77,6 +77,24 @@ migrate_autostart() {
 }
 
 case "$action" in
+existing-room)
+    database=$var/coordinator/room.sqlite
+    if [[ -e $database ]]; then
+        python3 - "$database" <<'PY'
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+database = Path(sys.argv[1]).as_uri()
+with sqlite3.connect(f"{database}?mode=ro", uri=True) as db:
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory'").fetchone():
+        row = db.execute("SELECT room FROM inventory WHERE id=1").fetchone()
+        if row:
+            print(json.loads(row[0])["roomId"])
+PY
+    fi
+    ;;
 prepare)
     role=$1
     required=(openssl git python3)
