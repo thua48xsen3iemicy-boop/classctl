@@ -120,6 +120,7 @@ body {
   position: relative;
   width: 14px;
   height: 14px;
+  flex: none;
 }
 .computers-icon::before,
 .computers-icon::after {
@@ -236,6 +237,7 @@ body {
   border-radius: 6px;
   text-align: left;
 }
+#tab,
 #power button,
 #power-menu button {
   display: flex;

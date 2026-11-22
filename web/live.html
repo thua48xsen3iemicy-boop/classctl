@@ -16,7 +16,9 @@
             <h1>Аудитория <span id="room-name"></span></h1>
             <button id="sidebar-pin" type="button" aria-pressed="false" aria-label="Закрепить панель">Закрепить</button>
           </div>
-          <button id="tab" type="button" aria-expanded="false" aria-controls="choices-panel" hidden>Компьютеры</button>
+          <button id="tab" type="button" aria-expanded="false" aria-controls="choices-panel" hidden>
+            <span class="computers-icon" aria-hidden="true"></span>Компьютеры
+          </button>
           <section id="choices-panel" hidden>
             <p id="count"></p>
             <label><input id="active-sessions-only" type="checkbox" checked /> Только с графической сессией</label>
