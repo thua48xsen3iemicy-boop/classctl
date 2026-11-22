@@ -613,8 +613,8 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     if not x11:
         assert page.locator("#grid canvas").evaluate_all(
             "canvases => canvases.map(canvas => [canvas.width, canvas.height])"
-        ) == [[400, 225], [127, 225]]
-        print("Preview: 400×225 landscape and 127×225 portrait decoded in Chromium")
+        ) == [[800, 450], [253, 450]]
+        print("Preview: 800×450 landscape and 253×450 portrait decoded in Chromium")
     monitors = page.evaluate(
         "async()=> (await (await fetch('/state')).json()).nodes['pc-01'].session.monitors"
     )
@@ -633,6 +633,21 @@ with patch("pwd.getpwuid", return_value=pwd.struct_passwd(user)):
     thumbnail.hover()
     page.wait_for_function("""() => document.querySelector('.monitor').title.endsWith(' · Экран 1')""")
     assert thumbnail.evaluate("button => [...button.children].map(child => child.tagName)") == ["CANVAS"]
+    if not x11:
+        page.evaluate("""() => {
+            window.previewCaptureTimes = [];
+            const preview = sockets.find(ws => ws.readyState === WebSocket.OPEN);
+            preview.addEventListener('message', ({data}) => {
+                if (!(data instanceof ArrayBuffer)) return;
+                const length = new DataView(data).getUint32(0);
+                const header = JSON.parse(new TextDecoder().decode(data.slice(4, 4 + length)));
+                previewCaptureTimes.push(Date.parse(header.capturedAt));
+            });
+        }""")
+        page.wait_for_function("previewCaptureTimes.length >= 3", timeout=5000)
+        times = page.evaluate("previewCaptureTimes.slice(0, 3)")
+        assert all(later - earlier >= 500 for earlier, later in zip(times, times[1:])), times
+        print("Preview: at least 500 ms between captures on a moving synthetic screen")
     status = page.evaluate("async()=>(await (await fetch('/state')).json()).nodes['pc-01']")
     check_overview_grid(ctx, origin, status)
     check_dense_grid(ctx, origin, status)
