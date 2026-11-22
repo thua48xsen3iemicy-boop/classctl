@@ -78,6 +78,7 @@ async def check_ui(origin):
         await expect(page.locator("#choices-panel")).to_be_visible()
         computers = page.locator("#tab")
         await expect(computers).to_have_attribute("aria-expanded", "true")
+        await expect(computers.locator(".computers-icon")).to_be_visible()
         await page.locator("#sidebar-pin").click()
         await expect(rail).to_be_hidden()
         await page.get_by_role("button", name="Включить тёмную тему").click()
