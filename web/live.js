@@ -388,9 +388,10 @@ document.addEventListener("pointerdown", (event) => {
 });
 
 const powerPanel = el("power");
+const railPower = el("rail-power");
 const powerMenu = el("power-menu");
 const powerStatus = el("power-status");
-const powerButtons = [...powerPanel.querySelectorAll("button")];
+const powerButtons = overview.querySelectorAll("#power button, #rail-power button");
 const menuButtons = [...powerMenu.querySelectorAll("button")];
 const selectedNodes = new Set();
 const powerMessages = {
@@ -409,6 +410,7 @@ function renderPower() {
   const nodes = state?.powerNodes;
   const available = Array.isArray(nodes);
   powerPanel.hidden = !available;
+  railPower.hidden = !available;
   if (!available) {
     selectedNodes.clear();
     closePowerMenu();
@@ -437,7 +439,8 @@ function formatPowerResult(outcomes) {
 
 async function sendPower(button, nodeIds, scope) {
   if (powerPending || !nodeIds.some((id) => state?.powerNodes?.includes(id))) return;
-  if (!window.confirm(`${button.textContent} ${scope}? Несохранённые данные могут быть потеряны.`)) return;
+  const label = button.getAttribute("aria-label") ?? button.textContent.trim();
+  if (!window.confirm(`${label} ${scope}? Несохранённые данные могут быть потеряны.`)) return;
   clearTimeout(powerStatusTimer);
   powerPending = true;
   powerStatus.textContent = "Отправка команды…";
@@ -739,6 +742,12 @@ function updateChoices(seats, visible) {
   }
   el("count").textContent = "Показано " + visible.length + " из " + seats.length;
 }
+function showRoomName(name) {
+  el("room-name").textContent = name;
+  const railName = el("rail-room-name");
+  railName.textContent = name;
+  railName.title = name;
+}
 async function poll() {
   try {
     const response = await fetch("/state", { cache: "no-store" });
@@ -747,7 +756,7 @@ async function poll() {
     state = await response.json();
     renderPower();
     document.title = state.room.roomId + " · classctl";
-    el("room-name").textContent = state.room.roomId;
+    showRoomName(state.room.roomId);
     if (initial) el("notice").textContent = "";
     if (focus) {
       const seat = state.room.seats.find((s) => s.seatId === focus.seat.seatId);
@@ -760,7 +769,7 @@ async function poll() {
     el("tab").hidden = true;
     closeFocus();
     clearGrid();
-    el("room-name").textContent = "";
+    showRoomName("");
     el("notice").textContent = "Аудитория недоступна";
   }
   setTimeout(poll, 600);
