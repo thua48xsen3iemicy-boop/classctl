@@ -86,10 +86,10 @@ async def check_ui(origin):
         assert await page.evaluate("localStorage.getItem('classctl.theme')") == "dark"
         sidebar = page.locator("#power")
         await expect(page.locator("#sidebar-panel button:not(#sidebar-pin, .theme-toggle)")).to_have_text([
-            "Компьютеры", "Выключить все", "Перезагрузить все",
+            "Компьютеры", "Выключить все", "Перезагрузить все", "Выключить без графической сессии",
         ])
         power_buttons = sidebar.get_by_role("button")
-        await expect(power_buttons).to_have_count(2)
+        await expect(power_buttons).to_have_count(3)
         for button in await power_buttons.all():
             await expect(button).to_have_css("text-align", "left")
             await expect(button).to_have_css("font-size", "10px")
@@ -179,6 +179,68 @@ async def check_ui(origin):
         await browser.close()
 
 
+async def check_shutdown_without_session(origin, client, source, state):
+    active = json.loads((power.CONTRACTS / "examples/status.json").read_text())
+    active["nodeId"] = "pc-02"
+    capabilities = dict(version=1, kind="capabilities", nodeId="pc-02",
+                        features=[], actions=power.CAPABILITIES)
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(
+            executable_path=shutil.which("chromium"), args=["--no-sandbox"],
+        )
+        page = await browser.new_page()
+        await page.goto(origin)
+        rail = page.locator("#overview-rail")
+        shutdown = rail.get_by_role("button", name="Выключить без графической сессии")
+        await expect(shutdown).to_be_enabled()
+        await expect(page.locator(".seat")).to_have_count(0)
+
+        await rail.get_by_role("button", name="Компьютеры").click()
+        await page.get_by_role("checkbox", name="pc-01").uncheck()
+        sidebar = page.locator("#power").get_by_role("button", name="Выключить без графической сессии")
+
+        async def dismiss(dialog):
+            assert dialog.message.startswith("Выключить без графической сессии (2 доступно)?")
+            await dialog.dismiss()
+
+        page.once("dialog", dismiss)
+        await sidebar.click()
+        status = page.locator("#power-status")
+        await expect(status).to_be_empty()
+
+        async def login_and_accept(dialog):
+            assert dialog.message.startswith("Выключить без графической сессии (2 доступно)?")
+            await source.send_json(active)
+            await source.send_json(capabilities)
+            await wait_state(client, origin, lambda result: (
+                result["nodes"]["pc-02"]["session"] and "pc-02" in result["powerNodes"]
+            ))
+            await dialog.accept()
+
+        page.once("dialog", login_and_accept)
+        async with page.expect_request(lambda request: request.url == origin + "/power") as posted:
+            await sidebar.click()
+        assert (await posted.value).post_data_json == dict(
+            actionId="system.shutdown", nodeIds=["pc-01", "pc-02"], requireNoSession=True,
+        )
+        await expect(status).to_have_text("Команда передана системе: 1 из 2 · Есть графическая сессия: 1")
+        await expect(page.locator('[data-node-id="pc-02"]')).to_be_visible()
+        await expect(page.locator('[data-node-id="pc-01"]')).to_have_count(0)
+
+        async def dismiss_remaining(dialog):
+            assert dialog.message.startswith("Выключить без графической сессии (1 доступно)?")
+            await dialog.dismiss()
+
+        page.once("dialog", dismiss_remaining)
+        await sidebar.click()
+        await browser.close()
+    await source.send_json(state["nodes"]["pc-02"])
+    await source.send_json(capabilities)
+    await wait_state(client, origin, lambda result: (
+        result["nodes"]["pc-02"]["session"] is None and "pc-02" in result["powerNodes"]
+    ))
+
+
 async def run(tmp):
     contexts, ids = identities(tmp)
     path = tmp / "policy"
@@ -261,6 +323,9 @@ async def run(tmp):
             ("pc-01", "issued"), ("pc-01", "succeeded"),
             ("pc-02", "issued"), ("pc-02", "succeeded"),
         ]
+        # The substituted reboot leaves pc-01 running. Expire its previous power reservation.
+        with closing(sqlite3.connect(tmp / "pc-01.sqlite")) as db, db:
+            db.execute("UPDATE power SET expires = unixepoch() WHERE request_id = ?", (request_ids.pop(),))
         await stop(tasks["pc-02"])
         await wait_state(client, origin, lambda state: state["powerNodes"] == ["pc-01"])
 
@@ -279,6 +344,8 @@ async def run(tmp):
             await source.send_json(dict(version=1, kind="capabilities", nodeId="pc-02",
                                         features=[], actions=power.CAPABILITIES))
             await wait_state(client, origin, lambda state: state["powerNodes"] == ["pc-01", "pc-02"])
+            await check_shutdown_without_session(origin, client, source, state)
+            assert calls == ["Reboot", "Reboot", "PowerOff"]
             pending = asyncio.create_task(send_to_pc02())
             stack.push_async_callback(stop, pending)
             dispatched = await source.receive_json(timeout=3)
@@ -293,7 +360,8 @@ async def run(tmp):
             await wait_state(client, origin, lambda state: state["powerNodes"] == ["pc-02"])
             async with asyncio.TaskGroup() as group:
                 pending = group.create_task(client.post(
-                    endpoint, json=dict(actionId="system.shutdown", nodeIds=["pc-01", "pc-02"]),
+                    endpoint, json=dict(actionId="system.shutdown", nodeIds=["pc-01", "pc-02"],
+                                        requireNoSession=True),
                     headers={"Origin": origin},
                 ))
                 dispatched = await source.receive_json(timeout=3)
@@ -304,8 +372,8 @@ async def run(tmp):
                 assert await response.json() == power.result(dispatched["requestId"], [
                     power.outcome("pc-01", "rejected", "offline"), succeeded,
                 ])
-        assert calls == ["Reboot", "Reboot"]
-    print("T16: Ctrl+клик, контекстное меню, вся аудитория, частичный успех, права и аудит OK")
+        assert calls == ["Reboot", "Reboot", "PowerOff"]
+    print("T16/T19: групповое питание, условное выключение, частичный успех, права и аудит OK")
 
 
 if __name__ == "__main__":
