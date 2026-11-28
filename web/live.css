@@ -344,14 +344,14 @@ body {
   container-type: inline-size;
 }
 #grid {
-  --preview-ratio: 32 / 9;
   --grid-gap: 6px;
   --base-columns: min(var(--columns, 1), var(--column-limit, var(--columns, 1)));
-  --min-card-width: calc((100% + var(--grid-gap)) / var(--base-columns) * var(--scale, 1) - var(--grid-gap));
+  --seat-columns: max(1, round(down, calc(var(--base-columns) / var(--scale, 1)), 1));
+  --monitor-columns: calc(2 * var(--seat-columns));
   width: 100%;
   padding: 6px 8px 8px 4px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--min-card-width)), 1fr));
+  grid-template-columns: repeat(var(--monitor-columns), minmax(0, 1fr));
   gap: var(--grid-gap);
 }
 @container (max-width: 1216px) {
@@ -373,12 +373,13 @@ body {
   #grid {
     --column-limit: 1;
   }
-  .outputs:has(> .monitor:only-child) {
-    --preview-ratio: 16 / 9;
-  }
 }
 .seat {
+  grid-column: span min(var(--outputs), var(--monitor-columns));
   min-width: 0;
+}
+#grid[data-one-seat] .seat {
+  grid-column: span 2;
 }
 .seat[data-selected],
 .seat:focus-visible {
@@ -408,11 +409,10 @@ body {
   width: 100%;
   grid-template-columns: repeat(var(--outputs, 1), minmax(0, 1fr));
   gap: 2px;
-  aspect-ratio: var(--preview-ratio);
+  aspect-ratio: calc(16 * var(--outputs)) / 9;
   min-height: 44px;
 }
 #grid[data-one-seat] .outputs {
-  aspect-ratio: calc(16 * var(--outputs, 1)) / 9;
   max-height: 70dvh;
 }
 .monitor {
