@@ -733,7 +733,7 @@ function createCard(seat, binding, displayName, sig) {
     },
   };
   const monitors = binding?.session?.monitors ?? [];
-  outputs.style.setProperty("--outputs", monitors.length || 1);
+  card.style.setProperty("--outputs", monitors.length || 1);
   for (const [index, monitor] of monitors.entries()) {
     stops.push(
       preview(seat, binding, monitor, "Экран " + (index + 1), identity, outputs, () => {

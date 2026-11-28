@@ -261,7 +261,7 @@ def check_dense_grid(context, origin, status):
 
         zoom_by_wheel(-120, steps=12)
         page.wait_for_function(
-            "getComputedStyle(document.querySelector('#grid')).gridTemplateColumns.split(' ').length === 1"
+            "document.querySelectorAll('.seat')[1].offsetTop > document.querySelector('.seat').offsetTop"
         )
         assert page.evaluate("""() => {
             const viewport = document.querySelector('#viewport');
@@ -276,7 +276,7 @@ def check_dense_grid(context, origin, status):
         page.set_viewport_size(dict(width=320, height=768))
         zoom_by_wheel(120, steps=7)
         page.wait_for_function(
-            "getComputedStyle(document.querySelector('#grid')).gridTemplateColumns.split(' ').length === 2"
+            "document.querySelectorAll('.seat')[1].offsetTop === document.querySelector('.seat').offsetTop"
         )
         assert page.locator("#viewport").evaluate("el => el.scrollWidth === el.clientWidth")
         assert page.locator(".seat").evaluate_all(
@@ -456,12 +456,12 @@ def check_overview_grid(context, origin, status):
         }""")
         assert cards.evaluate_all("cards=>cards.map(c=>c.querySelectorAll('.monitor').length)") == [2, 1, 2, 1, 2, 0]
         boxes = [card.bounding_box() for card in cards.all()]
-        assert boxes[0]["y"] == boxes[1]["y"] == boxes[2]["y"]
-        assert boxes[3]["y"] == boxes[4]["y"] == boxes[5]["y"] > boxes[0]["y"]
-        assert boxes[0]["x"] == boxes[3]["x"] < boxes[1]["x"] < boxes[2]["x"]
+        assert boxes[0]["y"] == boxes[1]["y"] == boxes[2]["y"] == boxes[3]["y"]
+        assert boxes[4]["y"] == boxes[5]["y"] > boxes[0]["y"]
+        assert boxes[0]["x"] == boxes[4]["x"] < boxes[1]["x"] < boxes[2]["x"]
         assert all(b["width"] > b["height"] for b in boxes)
         assert boxes[1]["x"] - boxes[0]["x"] - boxes[0]["width"] == 6
-        assert boxes[3]["y"] - boxes[0]["y"] - boxes[0]["height"] == 6
+        assert boxes[4]["y"] - boxes[0]["y"] - boxes[0]["height"] == 6
         assert cards.first.evaluate("card => getComputedStyle(card).borderWidth") == "0px"
         dual = cards.first.locator(".monitor").all()
         assert [m.get_attribute("aria-label") for m in dual] == [
@@ -471,7 +471,10 @@ def check_overview_grid(context, origin, status):
         assert not cards.locator(".connector").count()
         left, right = [m.bounding_box() for m in dual]
         assert left["y"] == right["y"] and left["x"] + left["width"] < right["x"]
-        assert cards.nth(1).locator(".monitor").bounding_box()["width"] > left["width"]
+        single = cards.nth(1).locator(".monitor").bounding_box()
+        assert abs(single["width"] - left["width"]) <= 3
+        assert abs(single["height"] - left["height"]) <= 2
+        assert abs(single["width"] / single["height"] - 16 / 9) < 0.01
 
         page.set_viewport_size(dict(width=390, height=844))
         narrow = [card.bounding_box() for card in cards.all()]
