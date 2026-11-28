@@ -47,10 +47,10 @@ esac
                     os.environ, TEST_BASE=str(base), TEST_STATE=str(state)
                 ):
                     if not (folder / "cert.pem").exists():
-                        update.request(identity)
-                        subprocess.run(["openssl", "req", "-x509", "-key", folder / "key.pem",
-                                        "-in", folder / "request.pem", "-days", "1",
-                                        "-out", folder / "cert.pem"], check=True)
+                        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                                        "-subj", "/CN=" + identity, "-keyout", folder / "key.pem",
+                                        "-days", "1", "-out", folder / "cert.pem"], check=True,
+                                       stderr=subprocess.DEVNULL)
                         (folder / "ca.pem").write_bytes((folder / "cert.pem").read_bytes())
                         if role == "server":
                             (config / "room.json").write_text('{"roomId":"lab"}')
@@ -67,6 +67,23 @@ esac
                 self.assertTrue(run(role, "current"))
                 self.assertTrue(run(role, "apply"))
                 self.assertEqual(calls.read_text(), previous)
+
+                key = root / role / "config" / ("server" if role == "server" else "node") / "key.pem"
+                saved_key = key.read_bytes()
+                key.unlink()
+                for action in ("current", "apply"):
+                    with self.assertRaisesRegex(ValueError, "Missing: .*key.pem"):
+                        run(role, action)
+                self.assertFalse(key.exists())
+                key.write_bytes(saved_key)
+                self.assertEqual(calls.read_text(), previous)
+
+            student_key = root / "student/config/node/key.pem"
+            saved_key = student_key.read_bytes()
+            student_key.write_bytes((root / "server/config/server/key.pem").read_bytes())
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                run("student", "current")
+            student_key.write_bytes(saved_key)
 
             git("-c", "user.name=Test", "-c", "user.email=test@example.test",
                 "commit", "--allow-empty", "-m", "second")

@@ -29,58 +29,11 @@ node /^pc-\d+\.school\.lan$/ {
 
 Учительская роль обновляет инвентарь в существующей SQLite, запускает службу и проверяет локальный портал. Ученическая роль обновляет системную службу и KDE-автозапуск. Смена ревизии использует тот же механизм обновления работающего графического агента, что и SSH-установка. OpenRC и systemd выбираются на месте. Нужны Git, OpenSSL, Python с venv и pip, системные зависимости роли из [инструкции установки](../ssh/README.md). Настройки зеркала или прокси pip задайте для системного pip на машинах. Окружение Python переиспользуется при неизменных зависимостях.
 
-## Новая машина и управление конфигурацией
+## Проверка сертификатов перед обновлением
 
-На новых машинах добавьте параметр `public_source` к роли. Это каталог файлов в вашем Puppet environment, например `puppet:///modules/classctl/lab-a/teacher` или `puppet:///modules/classctl/lab-a/pc-01`. Для этих примеров положите файлы под `modules/classctl/files/lab-a/`:
+Обе роли рассчитаны на машины с заранее установленными учётными данными classctl. На учительском ПК каталог сертификатов — `/etc/classctl/server`, на ученическом — `/etc/classctl/node`. При каждом прогоне, до обращения к Git, агент проверяет наличие `ca.pem`, `cert.pem` и `key.pem`, цепочку доверия, срок действия, пригодность сертификата для роли TLS и соответствие закрытому ключу. При ошибке Puppet сообщает причину и прерывает обновление на этой машине. После исправления сертификатов следующий прогон повторяет проверку.
 
-```text
-teacher/room.json
-teacher/policy.json
-teacher/server/ca.pem
-teacher/server/cert.pem
-pc-01/node/ca.pem
-pc-01/node/cert.pem
-```
-
-На первом применении Puppet создаёт на машине индивидуальный ключ и запрос `/etc/classctl/server/request.pem` у преподавателя или `/etc/classctl/node/request.pem` у ученика. Отсутствие подписанного сертификата до выпуска отражается ошибкой доставки файла. Скопируйте только запрос с соответствующей машины. Закрытые ключи остаются на машинах, ключ CA — у администратора.
-
-Подпишите запрос на машине администратора существующим CA аудитории. Для нового кабинета его можно создать командой ниже в новом закрытом каталоге. Для действующего кабинета используйте уже имеющиеся `ca.pem` и `ca.key`.
-
-```sh
-umask 077
-openssl req -x509 -newkey rsa:3072 -nodes -days 3650 \
-  -subj '/CN=classctl classroom CA' -addext 'basicConstraints=critical,CA:TRUE,pathlen:0' \
-  -addext 'keyUsage=critical,keyCertSign,cRLSign' -keyout ca.key -out ca.pem
-```
-
-Для учительского запроса создайте файл расширений:
-
-```ini
-basicConstraints=critical,CA:FALSE
-keyUsage=critical,digitalSignature,keyEncipherment
-extendedKeyUsage=serverAuth
-subjectAltName=DNS:classctl.school.lan
-```
-
-Для каждого ученического запроса используйте `extendedKeyUsage=clientAuth` и уберите строку `subjectAltName`. Команда выдачи для одного запроса и файла расширений:
-
-```sh
-openssl x509 -req -in request.pem -CA ca.pem -CAkey ca.key -CAcreateserial \
-  -days 365 -sha256 -extfile extensions.cnf -out cert.pem
-openssl x509 -in cert.pem -outform DER | sha256sum
-```
-
-Положите подписанный сертификат и открытый CA в каталог роли. Для учителя добавьте действующие `room.json` и `policy.json`. Минимальный пример на одно место:
-
-```json
-{"version":1,"kind":"room","roomId":"lab-a","seats":[{"seatId":"desk-1","row":1,"column":1,"nodeId":"pc-01"}]}
-```
-
-```json
-{"teachers":{"local":{"rooms":{"lab-a":["view"]}}},"nodes":{"<sha256 DER ученического сертификата>":"pc-01"}}
-```
-
-Замените значение в угловых скобках 64 строчными шестнадцатеричными символами из вывода sha256sum. При перевыпуске ученического сертификата обновите привязку в политике учителя. Открытые файлы обновляются через Puppet. При переносе существующей аудитории сохраните её текущие права, привязки всех узлов и настройку Nextcloud из действующего файла политики.
+Выдачу сертификатов и привязку SHA-256 отпечатков ученических сертификатов к `node_id` выполните при первичной подготовке кабинета. На учительском ПК также нужны `/etc/classctl/room.json` и `/etc/classctl/policy.json`. Если эти два файла ведутся в Puppet, можно указать у учительской роли `public_source => 'puppet:///modules/classctl/lab-a/teacher'` и положить их в `modules/classctl/files/lab-a/teacher/`.
 
 ## Проверка обновления
 

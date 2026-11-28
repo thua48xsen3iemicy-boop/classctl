@@ -2,7 +2,7 @@ define classctl::installation (
   String[1] $repository,
   String[1] $branch,
   Array[String[1], 2, 2] $arguments,
-  Optional[String[1]] $public_source,
+  Optional[String[1]] $public_source = undef,
 ) {
   $identity = $title ? { 'server' => 'server', 'student' => 'node' }
   $service_name = "classctl-${identity}"
@@ -15,30 +15,8 @@ define classctl::installation (
     source => 'puppet:///modules/classctl/update.py',
   }
 
-  $inputs = $title ? {
-    'server'  => ["${identity}/ca.pem", "${identity}/cert.pem", 'room.json', 'policy.json'],
-    'student' => ["${identity}/ca.pem", "${identity}/cert.pem"],
-  }
   if $public_source {
-    file { '/etc/classctl':
-      ensure => directory,
-      owner  => 'root',
-      mode   => '0755',
-    }
-    # host.sh assigns the server directory to the service group on activation.
-    file { "/etc/classctl/${identity}":
-      ensure => directory,
-      owner  => 'root',
-      mode   => $title ? { 'server' => '0750', 'student' => '0700' },
-    }
-    exec { 'prepare classctl certificate request':
-      command => [$installer, 'request', $identity],
-      creates => "/etc/classctl/${identity}/request.pem",
-      path    => ['/usr/bin', '/bin'],
-      require => [File[$installer], File["/etc/classctl/${identity}"]],
-      before  => Exec['apply classctl release'],
-    }
-    $inputs.each |$input| {
+    ['room.json', 'policy.json'].each |$input| {
       file { "/etc/classctl/${input}":
         ensure => file,
         owner  => 'root',

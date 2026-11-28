@@ -18,26 +18,27 @@ def output(*command):
     return subprocess.check_output(command, text=True).strip()
 
 
-def request(identity):
-    if identity not in ("server", "node"):
-        raise ValueError("Unknown certificate identity")
-    folder = CONFIG / identity
-    key = folder / "key.pem"
-    with tempfile.TemporaryDirectory(dir=folder) as tmp:
-        pem = Path(tmp) / "new.pem"
-        if not key.exists():
-            subprocess.run(["openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt",
-                            "rsa_keygen_bits:3072", "-out", pem], check=True)
-            pem.chmod(0o600)
-            pem.replace(key)
-        subprocess.run(["openssl", "req", "-new", "-subj", "/CN=" + identity,
-                        "-key", key, "-out", pem], check=True)
-        pem.replace(folder / "request.pem")
+def certificate_inputs(role):
+    identity = CONFIG / ("server" if role == "server" else "node")
+    inputs = [identity / name for name in ("ca.pem", "cert.pem", "key.pem")]
+    missing = [str(path) for path in inputs if not path.is_file()]
+    if missing:
+        raise ValueError("Provision classctl credentials before updating. Missing: " + ", ".join(missing))
+    subprocess.run(["openssl", "verify", "-purpose",
+                    "sslserver" if role == "server" else "sslclient",
+                    "-CAfile", identity / "ca.pem", identity / "cert.pem"], check=True)
+    if output("openssl", "x509", "-in", identity / "cert.pem", "-noout", "-pubkey") != output(
+        "openssl", "pkey", "-in", identity / "key.pem", "-passin", "pass:", "-pubout"
+    ):
+        raise ValueError(f"{identity}/cert.pem does not match {identity}/key.pem")
+
+    return inputs
 
 
 def update(action, repository, branch, role, first, second):
     if action not in ("apply", "current") or role not in ("student", "server"):
         raise ValueError("Unknown action or role")
+    inputs = certificate_inputs(role)
     subprocess.run(["git", "check-ref-format", "--branch", branch], check=True,
                    stdout=subprocess.DEVNULL)
     ref = "refs/heads/" + branch
@@ -46,8 +47,6 @@ def update(action, repository, branch, role, first, second):
     if remote_ref != ref:
         raise ValueError("Unexpected branch returned by Git")
     release = BASE / revision
-    identity = CONFIG / ("server" if role == "server" else "node")
-    inputs = [identity / name for name in ("ca.pem", "cert.pem", "key.pem")]
     if role == "server":
         inputs.extend([CONFIG / "room.json", CONFIG / "policy.json"])
     desired = [revision, role, first, second,
@@ -79,14 +78,6 @@ def update(action, repository, branch, role, first, second):
         if previous and previous != requested:
             raise ValueError(f"Existing room {previous} differs from requested {requested}")
 
-    subprocess.run(["openssl", "verify", "-purpose",
-                    "sslserver" if role == "server" else "sslclient",
-                    "-CAfile", identity / "ca.pem", identity / "cert.pem"], check=True)
-    if output("openssl", "x509", "-in", identity / "cert.pem", "-noout", "-pubkey") != output(
-        "openssl", "pkey", "-in", identity / "key.pem", "-pubout"
-    ):
-        raise ValueError("Certificate does not match the local private key")
-
     subprocess.run([*host, "release", revision], check=True)
     marker.unlink(missing_ok=True)
     if role == "server":
@@ -104,9 +95,6 @@ if __name__ == "__main__":
     os.umask(0o022)
     os.environ["GIT_TERMINAL_PROMPT"] = "0"
     try:
-        if sys.argv[1] == "request":
-            request(sys.argv[2])
-        else:
-            sys.exit(0 if update(*sys.argv[1:]) else 1)
+        sys.exit(0 if update(*sys.argv[1:]) else 1)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         sys.exit(str(error))
